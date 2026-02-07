@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description"
+        content="Professional Image Forensics Tool for ELA, Noise Analysis, and Metadata Inspection.">
+    <meta name="theme-color" content="#0F0F16">
+    <title>ForensicX - Professional Image Analysis Tool</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Google Fonts for premium typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- jsPDF for PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔬</text></svg>">
+</head>
+
+<body>
+    <!-- SVG Icon Sprite -->
+    <svg style="display: none;">
+        <symbol id="icon-microscope" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 18h8" />
+            <path d="M3 22h18" />
+            <path d="M14 22a7 7 0 1 0 0-14h-1" />
+            <path d="M9 14h2" />
+            <path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z" />
+            <path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3" />
+        </symbol>
+        <symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+                d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+        </symbol>
+        <symbol id="icon-beaker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4.5 3h15" />
+            <path d="M6 3v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V3" />
+            <path d="M6 14h12" />
+        </symbol>
+        <symbol id="icon-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18" />
+            <path d="m19 9-5 5-4-4-3 3" />
+        </symbol>
+        <symbol id="icon-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+            <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        </symbol>
+        <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+        </symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" />
+            <path d="M12 5v14" />
+        </symbol>
+        <symbol id="icon-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        </symbol>
+        <symbol id="icon-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </symbol>
+        <symbol id="icon-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+            <circle cx="9" cy="9" r="2" />
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+        </symbol>
+        <symbol id="icon-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" x2="20" y1="9" y2="9" />
+            <line x1="4" x2="20" y1="15" y2="15" />
+            <line x1="10" x2="8" y1="3" y2="21" />
+            <line x1="16" x2="14" y1="3" y2="21" />
+        </symbol>
+        <symbol id="icon-bar-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" x2="12" y1="20" y2="10" />
+            <line x1="18" x2="18" y1="20" y2="4" />
+            <line x1="6" x2="6" y1="20" y2="16" />
+        </symbol>
+        <symbol id="icon-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect width="7" height="7" x="3" y="3" rx="1" />
+            <rect width="7" height="7" x="14" y="3" rx="1" />
+            <rect width="7" height="7" x="14" y="14" rx="1" />
+            <rect width="7" height="7" x="3" y="14" rx="1" />
+        </symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+        </symbol>
+        <symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </symbol>
+        <symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </symbol>
+        <symbol id="icon-scissors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="3" />
+            <path d="M8.12 8.12 12 12" />
+            <path d="M20 4 8.12 15.88" />
+            <circle cx="6" cy="18" r="3" />
+            <path d="M14.8 14.8 20 20" />
+        </symbol>
+        <symbol id="icon-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+            <polyline points="16 7 22 7 22 13" />
+        </symbol>
+        <symbol id="icon-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8V4H8" />
+            <rect width="16" height="12" x="4" y="8" rx="2" />
+            <path d="M2 14h2" />
+            <path d="M20 14h2" />
+            <path d="M15 13v2" />
+            <path d="M9 13v2" />
+        </symbol>
+        <symbol id="icon-mask" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+                d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h4v2h4v-4c1-.5 1.7-1 2-2h2v-4h-2c0-1-.5-1.5-1-2h0V5z" />
+            <path d="M2 9v1c0 1.1.9 2 2 2h1" />
+            <path d="M16 11h0" />
+        </symbol>
+        <symbol id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </symbol>
+        <symbol id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </symbol>
+        <symbol id="icon-radio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
+            <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
+            <circle cx="12" cy="12" r="2" />
+            <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
+            <path d="M19.1 4.9C23 8.8 23 15.1 19.1 19" />
+        </symbol>
+        <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+            <circle cx="12" cy="13" r="3" />
+        </symbol>
+        <symbol id="icon-volume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        </symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+        </symbol>
+        <symbol id="icon-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+            <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+            <path d="M10 9H8" />
+            <path d="M16 13H8" />
+            <path d="M16 17H8" />
+        </symbol>
+        <symbol id="icon-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+            <path d="M2 12h20" />
+        </symbol>
+        <symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </symbol>
+        <symbol id="icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" x2="12" y1="3" y2="15" />
+        </symbol>
+        <symbol id="icon-zoom-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" x2="16.65" y1="21" y2="16.65" />
+            <line x1="11" x2="11" y1="8" y2="14" />
+            <line x1="8" x2="14" y1="11" y2="11" />
+        </symbol>
+        <symbol id="icon-zoom-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" x2="16.65" y1="21" y2="16.65" />
+            <line x1="8" x2="14" y1="11" y2="11" />
+        </symbol>
+        <symbol id="icon-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+            <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+            <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+        </symbol>
+        <symbol id="icon-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+        </symbol>
+        <symbol id="icon-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m15 18-6-6 6-6" />
+        </symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m9 18 6-6-6-6" />
+        </symbol>
+        <symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+        </symbol>
+        <symbol id="icon-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+        </symbol>
+        <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+            <path d="M12 9v4" />
+            <path d="M12 17h.01" />
+        </symbol>
+        <symbol id="icon-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+        </symbol>
+        <symbol id="icon-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+        </symbol>
+        <symbol id="icon-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+        </symbol>
+        <symbol id="icon-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+        </symbol>
+        <symbol id="icon-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+        </symbol>
+        <symbol id="icon-hard-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="12" x2="2" y2="12" />
+            <path
+                d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+            <line x1="6" y1="16" x2="6.01" y2="16" />
+            <line x1="10" y1="16" x2="10.01" y2="16" />
+        </symbol>
+        <symbol id="icon-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+            <rect x="9" y="9" width="6" height="6" />
+            <line x1="9" y1="1" x2="9" y2="4" />
+            <line x1="15" y1="1" x2="15" y2="4" />
+            <line x1="9" y1="20" x2="9" y2="23" />
+            <line x1="15" y1="20" x2="15" y2="23" />
+            <line x1="20" y1="9" x2="23" y2="9" />
+            <line x1="20" y1="15" x2="23" y2="15" />
+            <line x1="1" y1="9" x2="4" y2="9" />
+            <line x1="1" y1="15" x2="4" y2="15" />
+        </symbol>
+        <symbol id="icon-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="13.5" cy="6.5" r=".5" />
+            <circle cx="17.5" cy="10.5" r=".5" />
+            <circle cx="8.5" cy="7.5" r=".5" />
+            <circle cx="6.5" cy="12.5" r=".5" />
+            <path
+                d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+        </symbol>
+        <symbol id="icon-thermometer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+        </symbol>
+        <symbol id="icon-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </symbol>
+        <symbol id="icon-aperture" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="14.31" y1="8" x2="20.05" y2="17.94" />
+            <line x1="9.69" y1="8" x2="21.17" y2="8" />
+            <line x1="7.38" y1="12" x2="13.12" y2="2.06" />
+            <line x1="9.69" y1="16" x2="3.95" y2="6.06" />
+            <line x1="14.31" y1="16" x2="2.83" y2="16" />
+            <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
+        </symbol>
+        <symbol id="icon-lightbulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+                d="M15 14c.2-1 .7-1.7 1.5-2.5 1-1 1.5-2 1.5-3.5 0-3-2.5-5-5-5s-5 2-5 5c0 1.5.5 2.5 1.5 3.5.8.8 1.3 1.5 1.5 2.5" />
+            <path d="M9 18h6" />
+            <path d="M10 22h4" />
+        </symbol>
+        <symbol id="icon-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+                d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4">
+            </path>
+            <path d="M9 18c-4.51 2-5-2-7-2"></path>
+        </symbol>
+        <symbol id="icon-instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+        </symbol>
+        <symbol id="icon-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+                d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+            <path d="M5 3v4" />
+            <path d="M19 17v4" />
+            <path d="M3 5h4" />
+            <path d="M17 19h4" />
+        </symbol>
+    </svg>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <button class="btn btn-ghost btn-icon btn-sm" id="toggleSidebarBtn" style="margin-right: 8px;">
+                    <svg class="icon">
+                        <use href="#icon-menu" />
+                    </svg>
+                </button>
+                <div>
+                    <svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                        <text y="1.1em" font-size="80">🔬</text>
+                    </svg>
+                </div>
+                <div class="logo-text-group">
+                    <span class="logo-text">Forensic<span style="color: var(--accent-primary);">X</span></span>
+                    <span class="logo-badge">v2.1</span>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <button class="btn btn-ghost btn-icon tooltip" data-tooltip="Toggle Theme" id="themeToggleBtn">
+                    <svg class="icon">
+                        <use href="#icon-sun" />
+                    </svg>
+                </button>
+                <button class="btn btn-ghost btn-icon tooltip" data-tooltip="Keyboard Shortcuts" id="helpBtn">
+                    <svg class="icon">
+                        <use href="#icon-help-circle" />
+                    </svg>
+                </button>
+                <div class="header-divider"></div>
+                <button class="btn btn-ghost btn-icon tooltip" data-tooltip="New Case" id="newCaseBtn">
+                    <svg class="icon">
+                        <use href="#icon-folder" />
+                    </svg>
+                </button>
+                <button class="btn btn-secondary" id="runAllTestsBtn" style="display: none;">
+                    <svg class="icon">
+                        <use href="#icon-beaker" />
+                    </svg>
+                    Run All Tests
+                </button>
+                <button class="btn btn-secondary" id="fullReportBtn" style="display: none;">
+                    <svg class="icon">
+                        <use href="#icon-chart" />
+                    </svg>
+                    Full Report
+                </button>
+                <button class="btn btn-primary" id="exportReportBtn">
+                    <svg class="icon">
+                        <use href="#icon-download" />
+                    </svg>
+                    Export
+                </button>
+            </div>
+        </header>
+
+        <!-- Sidebar -->
+        <aside class="app-sidebar">
+            <!-- Case Files Section -->
+            <div class="sidebar-section">
+                <div class="sidebar-title">Case Files</div>
+                <div class="nav-item" id="uploadTrigger">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-plus" />
+                        </svg></span>
+                    <span>Add Image</span>
+                </div>
+                <div id="fileList" class="file-list"></div>
+            </div>
+
+            <!-- Analysis Categories -->
+            <div class="sidebar-section">
+                <div class="sidebar-title">Metadata & Files</div>
+                <div class="nav-item active" data-module="metadata">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-clipboard" />
+                        </svg></span>
+                    <span>EXIF / Metadata</span>
+                </div>
+                <div class="nav-item" data-module="file-analysis">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-lock" />
+                        </svg></span>
+                    <span>File Signature</span>
+                </div>
+                <div class="nav-item" data-module="thumbnail">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-image" />
+                        </svg></span>
+                    <span>Thumbnail Analysis</span>
+                </div>
+                <div class="nav-item" data-module="hashes">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-hash" />
+                        </svg></span>
+                    <span>Hash Generation</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Compression</div>
+                <div class="nav-item" data-module="jpeg-analysis">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-bar-chart" />
+                        </svg></span>
+                    <span>JPEG Quantization</span>
+                </div>
+                <div class="nav-item" data-module="dct-blocks">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-grid" />
+                        </svg></span>
+                    <span>DCT Block Analysis</span>
+                </div>
+                <div class="nav-item" data-module="double-compression">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-refresh" />
+                        </svg></span>
+                    <span>Double Compression</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Manipulation</div>
+                <div class="nav-item" data-module="ela">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-zap" />
+                        </svg></span>
+                    <span>Error Level Analysis</span>
+                    <span class="nav-item-badge">Key</span>
+                </div>
+                <div class="nav-item" data-module="clone-detection">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-copy" />
+                        </svg></span>
+                    <span>Clone Detection</span>
+                </div>
+                <div class="nav-item" data-module="splice-detection">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-scissors" />
+                        </svg></span>
+                    <span>Splice Detection</span>
+                </div>
+                <div class="nav-item" data-module="histogram">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-sliders" />
+                        </svg></span>
+                    <span>Histogram Analysis</span>
+                </div>
+                <div class="nav-item" data-module="noise">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-volume" />
+                        </svg></span>
+                    <span>Noise Analysis</span>
+                </div>
+                <div class="nav-item" data-module="fft">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-radio" />
+                        </svg></span>
+                    <span>FFT Frequency</span>
+                </div>
+                <div class="nav-item" data-module="prnu-fingerprint">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-fingerprint" />
+                        </svg></span>
+                    <span>Camera Fingerprint</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Advanced AI</div>
+                <div class="nav-item" data-module="deepfake">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-cpu" />
+                        </svg></span>
+                    <span>Deepfake / AI</span>
+                    <span class="nav-item-badge">New</span>
+                </div>
+                <div class="nav-item" data-module="gan-artifacts">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-aperture" />
+                        </svg></span>
+                    <span>GAN Artifacts</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Forensic Utils</div>
+                <div class="nav-item" data-module="strings">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-file-text" />
+                        </svg></span>
+                    <span>String Extraction</span>
+                </div>
+                <div class="nav-item" data-module="geolocation">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-map-pin" />
+                        </svg></span>
+                    <span>Geolocation</span>
+                </div>
+                <div class="nav-item" data-module="timeline">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-clock" />
+                        </svg></span>
+                    <span>Timeline Analysis</span>
+                </div>
+                <div class="nav-item" data-module="steganography">
+                    <span class="nav-item-icon"><svg class="icon">
+                            <use href="#icon-search" />
+                        </svg></span>
+                    <span>Steganography</span>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="about-card">
+                    <div class="about-header">
+                        <div class="logo-icon-sm">
+                            <svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                                <text y=".98em" font-size="80">🔬</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h4>ForensicX</h4>
+                            <p>v2.1</p>
+                        </div>
+                    </div>
+                    <p class="about-desc">
+                        Professional client-side image forensics suite for detecting manipulation, deepfakes, and
+                        steganography. Zero data upload.
+                    </p>
+                    <div class="social-links">
+                        <a href="https://github.com/John-Varghese-EH" target="_blank" class="social-link"
+                            title="GitHub">
+                            <svg class="icon">
+                                <use href="#icon-github" />
+                            </svg>
+                            <span>Github: John-Varghese-EH</span>
+                        </a>
+                        <a href="https://instagram.com/cyber__trinity" target="_blank" class="social-link"
+                            title="Instagram">
+                            <svg class="icon">
+                                <use href="#icon-instagram" />
+                            </svg>
+                            <span>Instagram: @cyber__trinity</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-main" id="mainContent">
+            <!-- Upload Zone (shown when no image is loaded) -->
+            <div class="upload-zone" id="uploadZone">
+                <input type="file" class="upload-input" id="fileInput" accept="image/*" multiple>
+                <div class="upload-zone-content">
+                    <div class="upload-icon">
+                        <svg width="64" height="64" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                            <text y=".98em" font-size="80">📁</text>
+                        </svg>
+                    </div>
+                    <h2 class="upload-title">Drop images here to analyze</h2>
+                    <p class="upload-subtitle">or click to browse your files</p>
+                    <div class="upload-formats">
+                        <span class="format-badge">JPEG</span>
+                        <span class="format-badge">PNG</span>
+                        <span class="format-badge">GIF</span>
+                        <span class="format-badge">WebP</span>
+                        <span class="format-badge">TIFF</span>
+                        <span class="format-badge">BMP</span>
+                        <span class="format-badge">HEIC</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image Viewer (shown when image is loaded) -->
+            <div class="image-viewer" id="imageViewer" style="display: none;">
+                <div class="viewer-container" id="viewerContainer">
+                    <!-- Comparison Slider will be injected here dynamically -->
+                    <img id="previewImage" class="image-viewer-canvas" alt="Loaded image for analysis">
+                </div>
+                <div class="image-viewer-info" id="imageInfo"></div>
+                <div class="image-viewer-toolbar">
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Zoom In" id="zoomInBtn"><svg
+                            class="icon">
+                            <use href="#icon-zoom-in" />
+                        </svg></button>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Zoom Out" id="zoomOutBtn"><svg
+                            class="icon">
+                            <use href="#icon-zoom-out" />
+                        </svg></button>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Reset View"
+                        id="resetViewBtn"><svg class="icon">
+                            <use href="#icon-rotate" />
+                        </svg></button>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Magic Lens (Pixel Peep)"
+                        id="magicLensBtn"><svg class="icon">
+                            <use href="#icon-aperture" />
+                        </svg></button>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Split Compare" id="compareBtn">
+                        <svg class="icon">
+                            <use href="#icon-columns" />
+                        </svg>
+                    </button>
+                    <div style="width: 1px; height: 20px; background: var(--border-default); margin: 0 8px;"></div>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Fullscreen"
+                        id="fullscreenBtn"><svg class="icon">
+                            <use href="#icon-maximize" />
+                        </svg></button>
+                    <div style="width: 1px; height: 20px; background: var(--border-default); margin: 0 8px;"></div>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Previous Image"
+                        id="prevImageBtn"><svg class="icon">
+                            <use href="#icon-chevron-left" />
+                        </svg></button>
+                    <button class="btn btn-ghost btn-sm btn-icon tooltip" data-tooltip="Next Image"
+                        id="nextImageBtn"><svg class="icon">
+                            <use href="#icon-chevron-right" />
+                        </svg></button>
+                </div>
+            </div>
+
+            <!-- Analysis Results Container -->
+            <div id="analysisContainer" style="display: none;">
+
+
+
+
+                <!-- Module-specific results will be injected here -->
+                <div id="moduleResults"></div>
+            </div>
+        </main>
+
+        <!-- Right Panel - Detailed Analysis -->
+        <aside class="app-panel" id="analysisPanel">
+            <div class="panel-header">
+                <h3>Analysis Details</h3>
+            </div>
+
+            <div id="panelContent">
+                <div class="card">
+                    <div class="card-body" style="text-align: center; padding: 32px;">
+                        <div style="margin-bottom: 16px; opacity: 1;">
+                            <svg width="64" height="64" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                                <text y=".98em" font-size="80">🔬</text>
+                            </svg>
+                        </div>
+                        <p style="font-size: 15px; font-weight: 500; margin-bottom: 8px;">Ready for Analysis</p>
+                        <p style="color: var(--text-muted); font-size: 13px;">Upload an image to begin forensic
+                            investigation</p>
+                    </div>
+                </div>
+
+                <!-- Quick Tips Card -->
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <span class="card-title-icon"><svg class="icon">
+                                    <use href="#icon-lightbulb" />
+                                </svg></span>
+                            Quick Tips
+                        </div>
+                    </div>
+                    <div class="card-body" style="font-size: 12px; color: var(--text-secondary);">
+                        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;">
+                            <span style="font-size: 16px;"><svg class="icon">
+                                    <use href="#icon-file-text" />
+                                </svg></span>
+                            <div><strong>Ctrl+O</strong> - Open file<br><strong>Ctrl+S</strong> - Save report</div>
+                        </div>
+                        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px;">
+                            <span style="font-size: 16px;"><svg class="icon">
+                                    <use href="#icon-image" />
+                                </svg></span>
+                            <div>Drag & drop multiple images to batch analyze</div>
+                        </div>
+                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                            <span style="font-size: 16px;"><svg class="icon">
+                                    <use href="#icon-zap" />
+                                </svg></span>
+                            <div>Use ELA to detect manipulated regions in photos</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Highlights -->
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <span class="card-title-icon"><svg class="icon">
+                                    <use href="#icon-sparkles" />
+                                </svg></span>
+                            Key Features
+                        </div>
+                    </div>
+                    <div class="card-body" style="font-size: 12px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <div
+                                style="padding: 10px; background: var(--bg-elevated); border-radius: 8px; text-align: center;">
+                                <div style="margin-bottom: 4px; color: var(--accent);"><svg class="icon icon-lg">
+                                        <use href="#icon-bot" />
+                                    </svg></div>
+                                <div style="font-weight: 500; font-size: 11px;">AI Detection</div>
+                            </div>
+                            <div
+                                style="padding: 10px; background: var(--bg-elevated); border-radius: 8px; text-align: center;">
+                                <div style="margin-bottom: 4px; color: var(--success);"><svg class="icon icon-lg">
+                                        <use href="#icon-globe" />
+                                    </svg></div>
+                                <div style="font-weight: 500; font-size: 11px;">GPS Extraction</div>
+                            </div>
+                            <div
+                                style="padding: 10px; background: var(--bg-elevated); border-radius: 8px; text-align: center;">
+                                <div style="margin-bottom: 4px; color: var(--warning);"><svg class="icon icon-lg">
+                                        <use href="#icon-lock" />
+                                    </svg></div>
+                                <div style="font-weight: 500; font-size: 11px;">SynthID Check</div>
+                            </div>
+                            <div
+                                style="padding: 10px; background: var(--bg-elevated); border-radius: 8px; text-align: center;">
+                                <div style="margin-bottom: 4px; color: var(--text-primary);"><svg class="icon icon-lg">
+                                        <use href="#icon-clipboard" />
+                                    </svg></div>
+                                <div style="font-weight: 500; font-size: 11px;">100+ EXIF Tags</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export Options -->
+            <div class="card" id="exportCard" style="display: none;">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-title-icon">📤</span>
+                        Export Report
+                    </div>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-secondary" style="width: 100%; margin-bottom: 8px;" id="exportJSON">
+                        <span>{ }</span> Export as JSON
+                    </button>
+                    <button class="btn btn-secondary" style="width: 100%; margin-bottom: 8px;" id="exportHTML">
+                        <span>📄</span> Export as HTML
+                    </button>
+                    <button class="btn btn-primary" style="width: 100%;" id="exportPDF">
+                        <span>📑</span> Export as PDF
+                    </button>
+                </div>
+                <h3 class="panel-title">Analysis Results</h3>
+                <button class="btn btn-ghost btn-sm btn-icon"><svg class="icon">
+                        <use href="#icon-more-horizontal" />
+                    </svg></button>
+            </div>
+
+            <!-- Findings Dashboard -->
+            <div class="findings-dashboard" id="findingsDashboard"
+                style="border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface);">
+                <div class="risk-score-container">
+                    <div id="riskScoreCircle" class="risk-score-circle">
+                        <div id="riskScoreValue" class="risk-score-value">--</div>
+                        <div class="risk-score-label">RISK</div>
+                    </div>
+                </div>
+                <div class="findings-summary" id="findingsSummary">
+                    <!-- Badges will be injected here -->
+                    <div class="finding-badge finding-safe">No Analysis Run</div>
+                </div>
+            </div>
+
+            <div class="panel-content" id="moduleResults">
+                <!-- Dynamic Content Here -->
+            </div>
+        </aside>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="modalOverlay" style="display: none;">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="btn btn-ghost btn-icon btn-sm" id="closeModal">✕</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <!-- Shortcuts Modal -->
+    <div class="modal-backdrop" id="shortcutsModal" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><svg class="icon">
+                        <use href="#icon-command" />
+                    </svg> Keyboard Shortcuts</h3>
+                <button class="btn btn-ghost btn-icon" id="closeShortcutsBtn"><svg class="icon">
+                        <use href="#icon-x" />
+                    </svg></button>
+            </div>
+            <div class="modal-content">
+                <div class="shortcut-list">
+                    <div class="shortcut-item"><span class="key">Ctrl</span> + <span class="key">O</span> <span>Open
+                            File</span></div>
+                    <div class="shortcut-item"><span class="key">Ctrl</span> + <span class="key">S</span> <span>Save
+                            Report</span></div>
+                    <div class="shortcut-item"><span class="key">Ctrl</span> + <span class="key">E</span> <span>Quick
+                            JSON Export</span></div>
+                    <div class="shortcut-item"><span class="key">Esc</span> <span>Reset View</span></div>
+                    <div class="shortcut-item"><span class="key">←</span> / <span class="key">→</span> <span>Next/Prev
+                            Image</span></div>
+                    <div class="shortcut-item"><span class="key">+</span> / <span class="key">-</span> <span>Zoom
+                            In/Out</span></div>
+                    <div class="shortcut-item"><span class="key">M</span> <span>Toggle Magic Lens</span></div>
+                    <div class="shortcut-item"><span class="key">C</span> <span>Toggle Compare</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Hidden canvases for analysis -->
+    <canvas id="analysisCanvas" style="display: none;"></canvas>
+    <canvas id="elaCanvas" style="display: none;"></canvas>
+    <canvas id="histogramCanvas" style="display: none;"></canvas>
+    <canvas id="fftCanvas" style="display: none;"></canvas>
+    <canvas id="noiseCanvas" style="display: none;"></canvas>
+
+    <!-- Scripts -->
+    <script src="js/app.js"></script>
+</body>
+
+</html>
