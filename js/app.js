@@ -26,6 +26,7 @@ class ForensicX {
         this.initTheme();
         this.initImageViewer(); // Initialize new viewer logic
         this.initDashboard();
+        this.setupMobilePanelToggle();
     }
 
     escapeHtml(text) {
