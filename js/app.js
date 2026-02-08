@@ -10,7 +10,8 @@ class ForensicX {
         this.images = [];
         this.currentIndex = 0;
         this.analysisData = {};
-        this.findings = []; // Initialize findings array
+        this.analysisImages = {}; // Store visual results for report
+        this.history = []; // Initialize findings array
         this.activeModule = 'metadata';
         this.initTheme = this.initTheme.bind(this);
         this.init();
@@ -18,11 +19,12 @@ class ForensicX {
 
     init() {
         this.bindEvents();
-        this.initNavigation();
+        this.initSidebar();
         this.initMagicLens();
         this.initShortcuts();
         this.initComparison();
         this.initTheme();
+        this.initImageViewer(); // Initialize new viewer logic
         this.initDashboard();
     }
 
@@ -232,71 +234,126 @@ class ForensicX {
         this.updateDashboardUI();
     }
 
-    initNavigation() {
+    initMagicLens() {
         this.isLensActive = false;
         const lensBtn = document.getElementById('magicLensBtn');
-        const viewer = document.getElementById('imageViewer');
+        const container = document.getElementById('viewerContainer');
+
+        if (!container) return; // Guard clause
 
         // Create lens elements
         this.lens = document.createElement('div');
         this.lens.className = 'magic-lens';
+        // Force pointer-events none to ensure clicks/moves pass through to container
+        this.lens.style.pointerEvents = 'none';
         this.lens.innerHTML = `
             <div class="lens-crosshair"></div>
-            <div class="lens-data" id="lensData">R:0 G:0 B:0 #000000</div>
+            <div class="lens-hud">
+                <div class="lens-row">
+                    <span>RGB</span>
+                    <span class="lens-value" id="lensRGB">0, 0, 0</span>
+                </div>
+                <div class="lens-row">
+                    <span>HEX</span>
+                    <span class="lens-value" id="lensHex">#000000</span>
+                </div>
+                <div class="lens-row">
+                    <span>XY</span>
+                    <span class="lens-value" id="lensCoords">0, 0</span>
+                </div>
+                <div class="lens-row">
+                    <span>Color</span>
+                    <div class="lens-color-preview" id="lensColor"></div>
+                </div>
+            </div>
         `;
-        viewer.appendChild(this.lens);
+        container.appendChild(this.lens); // Append to viewer container
 
         lensBtn?.addEventListener('click', () => {
             this.isLensActive = !this.isLensActive;
             lensBtn.classList.toggle('active', this.isLensActive);
             if (this.isLensActive) {
-                viewer.style.cursor = 'none';
+                container.style.cursor = 'none';
+                this.lens.classList.add('active'); // Start visible to avoid flicker
             } else {
-                viewer.style.cursor = 'default';
+                container.style.cursor = 'default'; // Was 'grab' in viewer, but default is safer for now
                 this.lens.classList.remove('active');
             }
         });
 
-        viewer.addEventListener('mousemove', (e) => this.updateLens(e));
-        viewer.addEventListener('mouseleave', () => this.lens.classList.remove('active'));
+        // Use requestAnimationFrame for smooth movement
+        let ticking = false;
+        container.addEventListener('mousemove', (e) => {
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    this.updateLens(e);
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        });
+
+        container.addEventListener('mouseleave', () => this.lens.classList.remove('active'));
     }
 
     updateLens(e) {
         if (!this.isLensActive || !this.currentImage) return;
 
+        const container = document.getElementById('viewerContainer');
         const img = document.getElementById('previewImage');
-        const rect = img.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const containerRect = container.getBoundingClientRect();
 
-        // Check if cursor is within image bounds
-        if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-            this.lens.classList.add('active');
+        // Mouse relative to container
+        let mouseX = e.clientX - containerRect.left;
+        let mouseY = e.clientY - containerRect.top;
 
-            // Move lens
-            this.lens.style.left = `${e.clientX - 100}px`;
-            this.lens.style.top = `${e.clientY - 100}px`;
+        // Check bounds within container
+        if (mouseX < 0 || mouseX > containerRect.width || mouseY < 0 || mouseY > containerRect.height) {
+            this.lens.classList.remove('active');
+            return;
+        }
 
-            // Calculate magnification
-            // We want to see the pixel under cursor 5x larger
-            const scaleX = this.currentImage.naturalWidth / rect.width;
-            const scaleY = this.currentImage.naturalHeight / rect.height;
+        this.lens.classList.add('active');
 
-            const realX = x * scaleX;
-            const realY = y * scaleY;
+        // Move lens to cursor
+        this.lens.style.left = `${mouseX - 100}px`;
+        this.lens.style.top = `${mouseY - 100}px`;
 
+        // Calculate actual image coordinates accounting for transform
+        // Transform: translate(x, y) scale(s)
+        // Image Space X = (Mouse X - Translate X) / Scale
+        const transform = this.transform || { x: 0, y: 0, scale: 1 };
+
+        // We need the rect of the image *without* transform to know initial placement if it was centered?
+        // Actually, easiest is to use the image's current bounding rect but reverse engineer the pixel.
+        const imgRect = img.getBoundingClientRect();
+
+        // Mouse relative to image (visual)
+        const visualX = e.clientX - imgRect.left;
+        const visualY = e.clientY - imgRect.top;
+
+        // Mouse relative to image (natural/original scale)
+        const scaleX = this.currentImage.naturalWidth / imgRect.width;
+        const scaleY = this.currentImage.naturalHeight / imgRect.height;
+
+        const realX = visualX * scaleX;
+        const realY = visualY * scaleY;
+
+        // Check if cursor is within the actual image
+        if (realX >= 0 && realX <= this.currentImage.naturalWidth && realY >= 0 && realY <= this.currentImage.naturalHeight) {
             // Update background position to show magnified view
-            // Magnification level 2x relative to original image resolution displayed at natural size
-            const magLevel = 2;
-            const bgSizeX = rect.width * magLevel;
-            const bgSizeY = rect.height * magLevel;
+            const magLevel = 2; // Magnification factor relative to natural size
+
+            // Background size must be: natural_width * magLevel
+            const bgSizeX = this.currentImage.naturalWidth * magLevel;
+            const bgSizeY = this.currentImage.naturalHeight * magLevel;
 
             this.lens.style.backgroundImage = `url('${this.currentImage.src}')`;
             this.lens.style.backgroundSize = `${bgSizeX}px ${bgSizeY}px`;
 
-            // Adjust position to center the target pixel
-            const bgPosX = -(x * magLevel - 100);
-            const bgPosY = -(y * magLevel - 100);
+            // Position: - (realX * magLevel - lensRadius)
+            const bgPosX = -(realX * magLevel - 100);
+            const bgPosY = -(realY * magLevel - 100);
             this.lens.style.backgroundPosition = `${bgPosX}px ${bgPosY}px`;
 
             // Get Pixel Data
@@ -306,7 +363,11 @@ class ForensicX {
             const lensCoords = document.getElementById('lensCoords');
             if (lensCoords) lensCoords.innerText = `${Math.round(realX)}, ${Math.round(realY)}`;
         } else {
-            this.lens.classList.remove('active');
+            // Inside container but outside image
+            this.lens.style.backgroundImage = 'none';
+            this.lens.style.backgroundColor = '#000';
+            const lensCoords = document.getElementById('lensCoords');
+            if (lensCoords) lensCoords.innerText = `Off Image`;
         }
     }
 
@@ -447,7 +508,7 @@ class ForensicX {
         });
     }
 
-    initNavigation() {
+    initSidebar() {
         const navItems = document.querySelectorAll('.nav-item[data-module]');
         navItems.forEach(item => {
             item.addEventListener('click', () => {
@@ -490,6 +551,7 @@ class ForensicX {
                 const img = new Image();
                 img.onload = async () => {
                     this.currentImage = img;
+                    this.transform = { scale: 1, x: 0, y: 0 }; // Reset transform
                     this.initDashboard(); // Reset dashboard
                     this.displayImage();
                     await this.runInitialAnalysis();
@@ -545,18 +607,81 @@ class ForensicX {
     }
 
     zoom(factor) {
-        const img = document.getElementById('previewImage');
-        img.style.width = `${img.clientWidth * factor}px`;
+        if (!this.currentImage) return;
+        const newScale = this.transform.scale * factor;
+        this.transform.scale = Math.max(0.1, Math.min(newScale, 10)); // Limit zoom 0.1x to 10x
+        this.updateTransform();
     }
 
     resetView() {
-        document.getElementById('previewImage').style.width = '';
+        this.transform = { scale: 1, x: 0, y: 0 };
+        this.updateTransform();
+    }
+
+    updateTransform() {
+        const img = document.getElementById('previewImage');
+        if (img) {
+            img.style.transform = `translate(${this.transform.x}px, ${this.transform.y}px) scale(${this.transform.scale})`;
+        }
     }
 
     toggleFullscreen() {
-        const viewer = document.getElementById('imageViewer');
-        if (!document.fullscreenElement) viewer.requestFullscreen?.();
-        else document.exitFullscreen?.();
+        const container = document.getElementById('viewerContainer'); // Target container for FS
+        if (!document.fullscreenElement) {
+            container.requestFullscreen?.().catch(err => {
+                console.error(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+        } else {
+            document.exitFullscreen?.();
+        }
+    }
+
+    initImageViewer() {
+        const container = document.getElementById('viewerContainer');
+        const img = document.getElementById('previewImage');
+        let isDragging = false;
+        let startX, startY, initialX, initialY;
+
+        // Mouse Wheel Zoom (Ctrl + Wheel)
+        container.addEventListener('wheel', (e) => {
+            if (!this.currentImage) return;
+
+            if (e.ctrlKey) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                this.zoom(delta);
+            }
+        });
+
+        // Panning Logic
+        container.addEventListener('mousedown', (e) => {
+            if (!this.currentImage) return;
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialX = this.transform.x;
+            initialY = this.transform.y;
+            container.classList.add('panning');
+            container.style.cursor = 'grabbing';
+            e.preventDefault(); // Prevent default drag behavior
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            this.transform.x = initialX + dx;
+            this.transform.y = initialY + dy;
+            this.updateTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                container.classList.remove('panning');
+                container.style.cursor = 'grab';
+            }
+        });
     }
 
     async runInitialAnalysis() {
@@ -619,9 +744,14 @@ class ForensicX {
             case 'splice-detection': await this.runSpliceDetection(); break;
             case 'noise': await this.runNoiseAnalysis(); break;
             case 'jpeg-analysis': await this.runJPEGAnalysis(); break;
-            case 'frequency': await this.runFFTAnalysis(); break; // FFT
+            case 'fft': await this.runFFTAnalysis(); break; // Fixed from 'frequency'
+            case 'spn': await this.runSPNAnalysis(); break;
+            case 'post-process': await this.runPostProcessCheck(); break;
+            case 'forgery-risk': await this.runForgeryRisk(); break;
+            case 'cgi-detection': await this.runCGIDetection(); break;
             case 'thumbnail': await this.runThumbnailAnalysis(); break;
             case 'strings': await this.runStringExtraction(); break;
+            case 'reverse-search': await this.runReverseImageSearch(); break;
             case 'geolocation': await this.runGeolocation(); break;
             case 'timeline': await this.runTimelineAnalysis(); break;
             case 'gan-artifacts': await this.runGANArtifacts(); break;
@@ -725,9 +855,13 @@ class ForensicX {
     async analyzeMetadata() {
         const buffer = await this.fileToArrayBuffer(this.currentFile);
         const exifData = this.parseEXIF(buffer);
-        this.analysisData.metadata = exifData;
-        this.analysisData.hasExif = Object.keys(exifData).length > 3;
-        this.analysisData.editingSoftware = this.detectEditingSoftware(exifData);
+        const xmpData = this.parseXMP(buffer);
+        const iptcData = this.parseIPTC(buffer);
+
+        // Merge all metadata
+        this.analysisData.metadata = { ...exifData, ...xmpData, ...iptcData };
+        this.analysisData.hasExif = Object.keys(this.analysisData.metadata).length > 3;
+        this.analysisData.editingSoftware = this.detectEditingSoftware(this.analysisData.metadata);
     }
 
     parseEXIF(buffer) {
@@ -867,6 +1001,17 @@ class ForensicX {
 
                         // Parse IFD0
                         this.parseIFD(view, tiffStart, tiffStart + ifdOffset, littleEndian, exifData, exifTags, bytes, gpsTags);
+
+                        // Check for IFD1 (Thumbnail)
+                        const entries = view.getUint16(tiffStart + ifdOffset, littleEndian);
+                        const nextIFDLocation = tiffStart + ifdOffset + 2 + (entries * 12);
+                        if (nextIFDLocation + 4 <= view.byteLength) {
+                            const nextIFDOffset = view.getUint32(nextIFDLocation, littleEndian);
+                            if (nextIFDOffset > 0) {
+                                // Parse IFD1
+                                this.parseIFD(view, tiffStart, tiffStart + nextIFDOffset, littleEndian, exifData, exifTags, bytes, gpsTags);
+                            }
+                        }
                     }
                 }
 
@@ -965,9 +1110,18 @@ class ForensicX {
                 case 4: // LONG
                     return view.getUint32(offset, littleEndian);
                 case 5: // RATIONAL
+                    if (count > 1) {
+                        const vals = [];
+                        for (let k = 0; k < count; k++) {
+                            const n = view.getUint32(offset + k * 8, littleEndian);
+                            const d = view.getUint32(offset + k * 8 + 4, littleEndian);
+                            vals.push(d === 0 ? 0 : n / d);
+                        }
+                        return vals;
+                    }
                     const num = view.getUint32(offset, littleEndian);
                     const den = view.getUint32(offset + 4, littleEndian);
-                    return den === 0 ? 0 : (num / den).toFixed(4).replace(/\.?0+$/, '');
+                    return den === 0 ? 0 : num / den;
                 case 9: // SLONG
                     return view.getInt32(offset, littleEndian);
                 case 10: // SRATIONAL
@@ -1013,7 +1167,151 @@ class ForensicX {
 
     detectEditingSoftware(metadata) {
         const software = metadata['Software'] || '';
-        return ['Photoshop', 'GIMP', 'Lightroom'].some(t => software.toLowerCase().includes(t.toLowerCase()));
+        const xmpHistory = metadata['XMP History'] || '';
+        return ['Photoshop', 'GIMP', 'Lightroom', 'Photosop', 'Krita'].some(t =>
+            software.toLowerCase().includes(t.toLowerCase()) ||
+            xmpHistory.toLowerCase().includes(t.toLowerCase())
+        );
+    }
+
+    // --- NEW: XMP PARSER ---
+    parseXMP(buffer) {
+        const view = new DataView(buffer);
+        let offset = 2;
+        const xmpData = {};
+
+        while (offset < buffer.byteLength - 4) {
+            if (view.getUint8(offset) !== 0xFF) break;
+            const marker = view.getUint8(offset + 1);
+            const length = view.getUint16(offset + 2);
+
+            if (marker === 0xE1) { // APP1
+                const nsStart = offset + 4;
+                const nsLength = 29; // "http://ns.adobe.com/xap/1.0/\0"
+                // Check signature
+                // Simple check: Is it XMP?
+                const sig = String.fromCharCode(...new Uint8Array(buffer.slice(nsStart, nsStart + 28)));
+                if (sig === "http://ns.adobe.com/xap/1.0/") {
+                    // Found XMP!
+                    const xmlStart = nsStart + nsLength;
+                    const xmlEnd = offset + 2 + length;
+                    const xmlString = String.fromCharCode(...new Uint8Array(buffer.slice(xmlStart, xmlEnd)));
+
+                    // Basic Regex Parsing (since no DOMParser context or heavy XML lib)
+                    const extract = (tag) => {
+                        const match = xmlString.match(new RegExp(`<${tag}>(.*?)</${tag}>`)) ||
+                            xmlString.match(new RegExp(`${tag}="([^"]+)"`));
+                        return match ? match[1] : null;
+                    };
+
+                    // Dublin Core
+                    if (extract('dc:format')) xmpData['XMP Format'] = extract('dc:format');
+                    if (extract('dc:title')) xmpData['XMP Title'] = extract('dc:title');
+                    if (extract('dc:description')) xmpData['XMP Description'] = extract('dc:description');
+                    if (extract('dc:creator')) xmpData['XMP Creator'] = extract('dc:creator');
+                    if (extract('dc:rights')) xmpData['XMP Rights'] = extract('dc:rights');
+
+                    // Photoshop
+                    if (extract('photoshop:DateCreated')) xmpData['XMP Date Created'] = extract('photoshop:DateCreated');
+                    if (extract('photoshop:City')) xmpData['XMP City'] = extract('photoshop:City');
+                    if (extract('photoshop:Country')) xmpData['XMP Country'] = extract('photoshop:Country');
+
+                    // History is complex (Seq), simpler check
+                    if (xmlString.includes('photoshop:History')) xmpData['XMP History'] = 'Present (Edited)';
+
+                    // AI signatures in XMP
+                    if (xmlString.includes('adobe:firefly') || xmlString.includes('Firefly')) xmpData['AI Generator'] = 'Adobe Firefly';
+                }
+            }
+            offset += 2 + length;
+        }
+        return xmpData;
+    }
+
+    // --- NEW: IPTC PARSER ---
+    parseIPTC(buffer) {
+        const view = new DataView(buffer);
+        let offset = 2;
+        const iptcData = {};
+
+        while (offset < buffer.byteLength - 4) {
+            if (view.getUint8(offset) !== 0xFF) break;
+            const marker = view.getUint8(offset + 1);
+            const length = view.getUint16(offset + 2);
+
+            if (marker === 0xED) { // APP13 (IPTC/Photoshop)
+                // Look for 'Photoshop 3.0\0' signature
+                const sig = String.fromCharCode(...new Uint8Array(buffer.slice(offset + 4, offset + 18))); // "Photoshop 3.0\0"
+                if (sig.startsWith("Photoshop 3.0")) {
+                    let pos = offset + 4 + 14; // Start of 8BIM blocks
+                    const end = offset + 2 + length;
+
+                    while (pos < end - 8) {
+                        const match = String.fromCharCode(...new Uint8Array(buffer.slice(pos, pos + 4)));
+                        if (match !== '8BIM') break;
+
+                        const id = view.getUint16(pos + 4); // Resource ID
+                        // Name (Pascal string, padded to even)
+                        const nameLen = view.getUint8(pos + 6);
+                        const paddedNameLen = nameLen % 2 === 0 ? nameLen + 2 : nameLen + 1;
+                        const size = view.getUint32(pos + 6 + paddedNameLen);
+
+                        const dataStart = pos + 10 + paddedNameLen;
+
+                        // ID 0x0404 is IPTC-NAA
+                        if (id === 0x0404) {
+                            this.parseIPTCBlock(buffer, dataStart, size, iptcData);
+                        }
+
+                        pos = dataStart + size;
+                        if (pos % 2 !== 0) pos++; // Pad to even
+                    }
+                }
+            }
+            offset += 2 + length;
+        }
+        return iptcData;
+    }
+
+    parseIPTCBlock(buffer, start, length, output) {
+        let pos = start;
+        const end = start + length;
+        const view = new DataView(buffer);
+
+        while (pos < end - 5) {
+            const tagMarker = view.getUint8(pos);
+            if (tagMarker !== 0x1C) { pos++; continue; } // 0x1C is IIM marker
+
+            const record = view.getUint8(pos + 1);
+            const dataset = view.getUint8(pos + 2);
+            const size = view.getUint16(pos + 3);
+
+            if (pos + 5 + size > end) break;
+
+            const value = String.fromCharCode(...new Uint8Array(buffer.slice(pos + 5, pos + 5 + size)));
+
+            // Map common IPTC datasets
+            if (record === 2) {
+                const keys = {
+                    5: 'Object Name', 15: 'Category', 25: 'Keywords',
+                    55: 'Date Created', 60: 'Time Created', 80: 'By-line',
+                    85: 'By-line Title', 90: 'City', 92: 'Sub-location',
+                    95: 'Province/State', 101: 'Country/Primary Location Name',
+                    105: 'Headline', 110: 'Credit', 115: 'Source',
+                    116: 'Copyright Notice', 120: 'Caption/Abstract',
+                    122: 'Writer/Editor'
+                };
+                if (keys[dataset]) {
+                    // Accumulate keywords (2:25)
+                    if (dataset === 25 && output[keys[25]]) {
+                        output[keys[25]] += `, ${value}`;
+                    } else {
+                        output[keys[dataset]] = value;
+                    }
+                }
+            }
+            pos += 5 + size;
+        }
     }
 
     displayMetadata() {
@@ -1130,22 +1428,67 @@ class ForensicX {
         document.getElementById('moduleResults').innerHTML = this.createCard(`📋 EXIF / Metadata Analysis <span style="font-size: 13px; color: var(--text-muted); font-weight: normal;">(${metadataCount} fields found)</span>`, html);
     }
 
-    // FILE SIGNATURE
+    // FILE SIGNATURE & TRUE MIME TYPE
     async analyzeFileSignature() {
         const buffer = await this.fileToArrayBuffer(this.currentFile);
-        const bytes = new Uint8Array(buffer.slice(0, 16));
-        const signatures = {
-            'JPEG': [0xFF, 0xD8, 0xFF], 'PNG': [0x89, 0x50, 0x4E, 0x47],
-            'GIF': [0x47, 0x49, 0x46, 0x38], 'WebP': [0x52, 0x49, 0x46, 0x46], 'BMP': [0x42, 0x4D]
-        };
-        let detectedType = 'Unknown';
-        for (const [type, sig] of Object.entries(signatures)) {
-            if (sig.every((byte, i) => bytes[i] === byte)) { detectedType = type; break; }
+        const bytes = new Uint8Array(buffer.slice(0, 32)); // Read first 32 bytes for deeper check
+
+        // Comprehensive Magic Bytes Signature List
+        const signatures = [
+            { type: 'image/jpeg', ext: 'jpg', sig: [0xFF, 0xD8, 0xFF] },
+            { type: 'image/png', ext: 'png', sig: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] },
+            { type: 'image/gif', ext: 'gif', sig: [0x47, 0x49, 0x46, 0x38] },
+            { type: 'image/webp', ext: 'webp', sig: [0x52, 0x49, 0x46, 0x46, null, null, null, null, 0x57, 0x45, 0x42, 0x50] }, // RIFF....WEBP
+            { type: 'image/bmp', ext: 'bmp', sig: [0x42, 0x4D] },
+            { type: 'image/tiff', ext: 'tiff', sig: [0x49, 0x49, 0x2A, 0x00] }, // LE
+            { type: 'image/tiff', ext: 'tiff', sig: [0x4D, 0x4D, 0x00, 0x2A] }, // BE
+            { type: 'image/x-icon', ext: 'ico', sig: [0x00, 0x00, 0x01, 0x00] },
+            { type: 'image/heic', ext: 'heic', sig: [null, null, null, null, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69] }, // ...ftyphic
+            { type: 'image/avif', ext: 'avif', sig: [null, null, null, null, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66] }, // ...ftypavif
+            { type: 'application/pdf', ext: 'pdf', sig: [0x25, 0x50, 0x44, 0x46, 0x2D] },
+            { type: 'application/zip', ext: 'zip', sig: [0x50, 0x4B, 0x03, 0x04] }
+        ];
+
+        let detectedMime = 'Unknown';
+        let detectedExt = 'unknown';
+
+        for (const { type, ext, sig } of signatures) {
+            let match = true;
+            for (let i = 0; i < sig.length; i++) {
+                if (sig[i] !== null && bytes[i] !== sig[i]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                detectedMime = type;
+                detectedExt = ext;
+                break;
+            }
         }
-        const declaredType = this.currentFile.type.split('/')[1]?.toUpperCase() || 'Unknown';
-        this.analysisData.signatureValid = detectedType.toUpperCase().includes(declaredType) || declaredType.includes(detectedType);
-        this.analysisData.detectedType = detectedType;
-        this.analysisData.magicBytes = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        const declaredType = this.currentFile.type || 'unknown/unknown';
+        const declaredExt = (this.currentFile.name.split('.').pop() || '').toLowerCase();
+
+        // Mime Match Logic
+        const isMimeMatch = declaredType === detectedMime || (detectedMime === 'Unknown');
+        // Extension Match Logic (Loose check for jpeg/jpg etc)
+        const isExtMatch = declaredExt.includes(detectedExt) || detectedExt.includes(declaredExt) || (detectedExt === 'unknown');
+
+        const isSpoofed = !isMimeMatch && detectedMime !== 'Unknown';
+
+        this.analysisData.signatureValid = !isSpoofed;
+        this.analysisData.detectedType = detectedMime;
+        this.analysisData.magicBytes = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+
+        // REPORT FINDING
+        if (isSpoofed) {
+            this.addFinding('Security Alert', 'danger', `Extension Spoofing Detected! File is ${detectedMime} but masquerading as ${declaredExt}.`);
+        } else if (detectedMime === 'Unknown') {
+            this.addFinding('File Signature', 'warning', 'Unknown File Signature');
+        } else {
+            // this.addFinding('File Signature', 'success', `Verified ${detectedMime.split('/')[1].toUpperCase()}`);
+        }
     }
 
     initMagicLens() {
@@ -1278,16 +1621,17 @@ class ForensicX {
     async generateHashes() {
         const buffer = await this.fileToArrayBuffer(this.currentFile);
         this.analysisData.hashes = {
-            sha256: await this.computeHash(buffer),
+            sha256: await this.computeHash(buffer, 'SHA-256'),
+            sha1: await this.computeHash(buffer, 'SHA-1'),
             aHash: this.computePerceptualHash()
         };
     }
 
-    async computeHash(buffer) {
+    async computeHash(buffer, algorithm) {
         try {
-            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+            const hashBuffer = await crypto.subtle.digest(algorithm, buffer);
             return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-        } catch { return 'N/A'; }
+        } catch { return 'N/A (Secure Context Required)'; }
     }
 
     computePerceptualHash() {
@@ -1303,15 +1647,40 @@ class ForensicX {
             pixels.push(gray);
             sum += gray;
         }
-        return pixels.map(p => p > sum / pixels.length ? '1' : '0').join('');
+        const avg = sum / pixels.length;
+        return pixels.map(p => p > avg ? '1' : '0').join('');
     }
 
     displayHashes() {
         const hashes = this.analysisData.hashes || {};
         document.getElementById('moduleResults').innerHTML = this.createCard('#️⃣ Hash Generation', `
             <div class="result-item"><div class="result-label">SHA-256</div><div class="result-value" style="font-family: var(--font-mono); font-size: 11px; word-break: break-all;">${hashes.sha256}</div></div>
-                <div class="result-item" style="margin-top: 12px;"><div class="result-label">Perceptual Hash (aHash)</div><div class="result-value" style="font-family: var(--font-mono); font-size: 11px;">${hashes.aHash}</div></div>
+            <div class="result-item"><div class="result-label">SHA-1</div><div class="result-value" style="font-family: var(--font-mono); font-size: 11px; word-break: break-all;">${hashes.sha1}</div></div>
+            <div class="result-item" style="margin-top: 12px;"><div class="result-label">Perceptual Hash (aHash)</div><div class="result-value" style="font-family: var(--font-mono); font-size: 11px;">${hashes.aHash}</div></div>
+            
+            <div style="margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">Verify Hash</div>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="hashInput" class="form-control" placeholder="Paste SHA-256 or SHA-1 hash to verify..." style="flex: 1; font-size: 12px;">
+                    <button class="btn btn-secondary" id="verifyHashBtn">Check</button>
+                </div>
+                <div id="hashMatchResult" style="margin-top: 8px; font-size: 13px; height: 20px;"></div>
+            </div>
         `);
+
+        document.getElementById('verifyHashBtn').addEventListener('click', () => {
+            const input = document.getElementById('hashInput').value.trim().toLowerCase();
+            const res = document.getElementById('hashMatchResult');
+            if (!input) return;
+
+            if (input === hashes.sha256) {
+                res.innerHTML = '<span style="color: var(--success);">✅ Match found (SHA-256)</span>';
+            } else if (input === hashes.sha1) {
+                res.innerHTML = '<span style="color: var(--success);">✅ Match found (SHA-1)</span>';
+            } else {
+                res.innerHTML = '<span style="color: var(--danger);">❌ No match found</span>';
+            }
+        });
     }
 
     // HISTOGRAM
@@ -1455,6 +1824,10 @@ class ForensicX {
                     </p>
                 `;
                 document.getElementById('elaCanvasContainer').appendChild(diffCanvas);
+
+                // Capture visual for report
+                this.analysisImages['ela'] = diffCanvas.toDataURL('image/jpeg', 0.8);
+
                 resolve(); // Resolve promise
             };
             jpegImg.src = jpegUrl;
@@ -1462,36 +1835,201 @@ class ForensicX {
     }
 
     // STEGANOGRAPHY
+    // STEGANOGRAPHY
     async runSteganography(autoRun = false) {
-        document.getElementById('moduleResults').innerHTML = this.createCard('<svg class="icon"><use href="#icon-search"/></svg> Steganography Detection', `
-            <button class="btn btn-primary" id="runLSB"><span><svg class="icon"><use href="#icon-zoom-in"/></svg></span> LSB Analysis</button>
+        document.getElementById('moduleResults').innerHTML = this.createCard('<svg class="icon"><use href="#icon-search"/></svg> Steganography & Bit Plane Slicer', `
+            <div class="control-group">
+                <label class="input-label">Target Channel</label>
+                <select class="form-select" id="stegoChannel">
+                    <option value="rgb">RGB (Composite)</option>
+                    <option value="r">Red Channel</option>
+                    <option value="g">Green Channel</option>
+                    <option value="b">Blue Channel</option>
+                    <option value="a">Alpha Channel (Transparency)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="input-label">Bit Plane (0=LSB, 7=MSB)</label>
+                <div class="btn-group" id="bitPlaneBtns">
+                    ${[7, 6, 5, 4, 3, 2, 1, 0].map(i => `<button class="btn btn-sm ${i === 0 ? 'btn-primary' : 'btn-secondary'}" data-bit="${i}">Bit ${i}</button>`).join('')}
+                </div>
+            </div>
             <div id="stegoResults" style="margin-top: 16px;"></div>
         `);
-        document.getElementById('runLSB').addEventListener('click', () => this.analyzeLSB());
 
-        if (autoRun) await this.analyzeLSB();
+        const updateAnalysis = () => {
+            const channel = document.getElementById('stegoChannel').value;
+            const bit = parseInt(document.querySelector('#bitPlaneBtns .btn-primary').dataset.bit);
+            this.analyzeBitPlane(channel, bit);
+        };
+
+        document.getElementById('stegoChannel').addEventListener('change', updateAnalysis);
+        document.querySelectorAll('#bitPlaneBtns .btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('#bitPlaneBtns .btn').forEach(b => {
+                    b.classList.remove('btn-primary');
+                    b.classList.add('btn-secondary');
+                });
+                e.target.classList.remove('btn-secondary');
+                e.target.classList.add('btn-primary');
+                updateAnalysis();
+            });
+        });
+
+        // Run default (Bit 0, RGB)
+        this.analyzeBitPlane('rgb', 0);
     }
-    async analyzeLSB() {
+
+    async analyzeBitPlane(channel, bitIndex) {
+        document.getElementById('stegoResults').innerHTML = '<div class="spinner"></div>';
+
+        // Use timeout to allow UI to update
+        await new Promise(r => setTimeout(r, 10));
+
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = this.currentImage.width; canvas.height = this.currentImage.height;
+        canvas.width = this.currentImage.width;
+        canvas.height = this.currentImage.height;
         ctx.drawImage(this.currentImage, 0, 0);
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const lsb = [];
-        for (let i = 0; i < data.length; i += 4) lsb.push(data[i] & 1);
-        let transitions = 0;
-        for (let i = 1; i < lsb.length; i++) if (lsb[i] !== lsb[i - 1]) transitions++;
-        const randomness = transitions / (lsb.length - 1);
-        let suspicion = 'Low', suspicionClass = 'success';
-        if (randomness < 0.4) { suspicion = 'High'; suspicionClass = 'danger'; }
-        else if (randomness < 0.55) { suspicion = 'Medium'; suspicionClass = 'warning'; }
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        let zeros = 0;
+        let ones = 0;
+        let extractedBits = []; // For preview
+        const maxPreviewBits = 1024 * 8; // 1KB
+
+        for (let i = 0; i < data.length; i += 4) {
+            if (channel === 'rgb') {
+                const r = (data[i] >> bitIndex) & 1;
+                const g = (data[i + 1] >> bitIndex) & 1;
+                const b = (data[i + 2] >> bitIndex) & 1;
+
+                data[i] = r * 255;
+                data[i + 1] = g * 255;
+                data[i + 2] = b * 255;
+
+                // Stats & Extraction (Interleaved R G B)
+                if (extractedBits.length < maxPreviewBits) {
+                    extractedBits.push(r, g, b);
+                }
+                if (r) ones++; else zeros++;
+                if (g) ones++; else zeros++;
+                if (b) ones++; else zeros++;
+
+            } else {
+                let offset = channel === 'r' ? 0 : channel === 'g' ? 1 : (channel === 'b' ? 2 : 3);
+                const bit = (data[i + offset] >> bitIndex) & 1;
+                const val = bit * 255;
+
+                // Visualization: Grayscale for single channel
+                data[i] = val;
+                data[i + 1] = val;
+                data[i + 2] = val;
+                data[i + 3] = 255; // Force opacity for visualization
+
+                if (extractedBits.length < maxPreviewBits) extractedBits.push(bit);
+                if (bit) ones++; else zeros++;
+            }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+
+        // Entropy Calculation
+        const total = zeros + ones;
+        const p0 = zeros / total;
+        const p1 = ones / total;
+        let entropy = 0;
+        if (p0 > 0 && p1 > 0) {
+            entropy = - (p0 * Math.log2(p0) + p1 * Math.log2(p1));
+        }
+
+        // Stats: Randomness & Likelihood
+        const randomness = (entropy * 100).toFixed(2);
+        let likelihood = 'Low';
+        let likelihoodColor = 'var(--text-secondary)';
+
+        if (entropy > 0.95) {
+            likelihood = 'Very High';
+            likelihoodColor = 'var(--danger)';
+        } else if (entropy > 0.85) {
+            likelihood = 'High';
+            likelihoodColor = 'var(--warning)';
+        } else if (entropy > 0.70) {
+            likelihood = 'Medium';
+            likelihoodColor = 'var(--accent)';
+        }
+
+        // Store for Report
+        if (!this.analysisData.stego) this.analysisData.stego = {};
+        this.analysisData.stego = {
+            channel, bitIndex, entropy: entropy.toFixed(4), randomness: randomness + '%', likelihood
+        };
+
+        // Data Preview (Bytes)
+        let hexPreview = '';
+        let asciiPreview = '';
+
+        // Convert bits to bytes
+        for (let i = 0; i < Math.min(extractedBits.length, 1024); i += 8) {
+            let byte = 0;
+            for (let j = 0; j < 8; j++) {
+                if (i + j < extractedBits.length) {
+                    byte = (byte << 1) | extractedBits[i + j];
+                }
+            }
+            hexPreview += byte.toString(16).padStart(2, '0') + ' ';
+            asciiPreview += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
+        }
+
         document.getElementById('stegoResults').innerHTML = `
-            <div class="result-grid">
-                <div class="result-item"><div class="result-label">LSB Randomness</div><div class="result-value">${(randomness * 100).toFixed(1)}%</div></div>
-                <div class="result-item"><div class="result-label">Stego Likelihood</div><div class="result-value ${suspicionClass}">${suspicion}</div></div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
+                <div class="stat-card" style="background: var(--bg-elevated); padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 10px; opacity: 0.7;">Bit Plane</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Bit ${bitIndex} (${channel.toUpperCase()})</div>
+                </div>
+                <div class="stat-card" style="background: var(--bg-elevated); padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 10px; opacity: 0.7;">Entropy</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">${entropy.toFixed(4)}</div>
+                </div>
+                <div class="stat-card" style="background: var(--bg-elevated); padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 10px; opacity: 0.7;">Randomness</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">${randomness}%</div>
+                </div>
+                 <div class="stat-card" style="background: var(--bg-elevated); padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 10px; opacity: 0.7;">Stego Likelihood</div>
+                    <div style="font-weight: 600; color: ${likelihoodColor};">${likelihood}</div>
+                </div>
             </div>
-            `;
+            
+            <div style="overflow: auto; max-height: 400px; border: 1px solid var(--border-subtle); border-radius: 4px; margin-bottom: 12px;">
+                <canvas class="analysis-canvas" style="max-width: 100%; height: auto; display: block;"></canvas>
+            </div>
+
+            <div class="card" style="background: var(--bg-elevated);">
+                <div class="card-header" style="padding: 8px 12px; font-size: 12px; font-weight: 600;">
+                    Data Extraction Preview (First 128 Bytes)
+                </div>
+                <div class="card-body" style="padding: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px; font-family: var(--font-mono); font-size: 10px;">
+                    <div style="white-space: pre-wrap; word-break: break-all; color: var(--text-muted);">${hexPreview}</div>
+                    <div style="white-space: pre-wrap; word-break: break-all; color: var(--text-primary); border-left: 1px solid var(--border-subtle); padding-left: 12px;">${asciiPreview}</div>
+                </div>
+            </div>
+        `;
+
+        // Append canvas carefully to avoid re-rendering issues
+        const container = document.querySelector('#stegoResults canvas');
+        // Replace the placeholder canvas with ours, or draw to it.
+        container.replaceWith(canvas);
+        canvas.className = 'analysis-canvas';
+        canvas.style.maxWidth = '100%';
+        canvas.style.height = 'auto';
+
+        // Capture visual for report
+        this.analysisImages['stego'] = canvas.toDataURL('image/png');
     }
+
 
     // DEEPFAKE / AI DETECTION
     async runDeepfakeDetection(autoRun = false) {
@@ -1919,6 +2457,561 @@ class ForensicX {
             `;
     }
 
+    // STATISTICAL HELPER
+    calculateStatistics(data) {
+        if (!data || data.length === 0) return { mean: 0, variance: 0, skewness: 0, kurtosis: 0 };
+
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const mean = sum / data.length;
+
+        let m2 = 0;
+        let m3 = 0;
+        let m4 = 0;
+
+        for (let i = 0; i < data.length; i++) {
+            const delta = data[i] - mean;
+            m2 += delta * delta;
+            m3 += delta * delta * delta;
+            m4 += delta * delta * delta * delta;
+        }
+
+        const variance = m2 / data.length;
+        const stdDev = Math.sqrt(variance);
+        const skewness = (1 / data.length) * m3 / Math.pow(stdDev, 3);
+        const kurtosis = ((1 / data.length) * m4 / Math.pow(stdDev, 4)) - 3; // Excess Kurtosis
+
+        return { mean, variance, stdDev, skewness, kurtosis };
+    }
+
+    // SPN ANALYSIS (Sensor Pattern Noise / Noise Residual)
+    async runSPNAnalysis() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🌫️ SPN Analysis (Noise Residual)', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Extracts the "noise residual" by subtracting a smoothed version of the image. 
+                Spliced regions often disrupt the camera's natural sensor noise pattern.
+            </p>
+            <button class="btn btn-primary" id="runSPNBtn"><span>🔬</span> Extract Noise Map</button>
+            <div id="spnResults" style="margin-top: 16px;"></div>
+        `);
+        document.getElementById('runSPNBtn').addEventListener('click', () => this.analyzeSPN());
+    }
+
+    async analyzeSPN() {
+        document.getElementById('spnResults').innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 100));
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = this.currentImage.width;
+        canvas.height = this.currentImage.height;
+        ctx.drawImage(this.currentImage, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // output canvas
+        const spnCanvas = document.createElement('canvas');
+        spnCanvas.width = width;
+        spnCanvas.height = height;
+        const spnCtx = spnCanvas.getContext('2d');
+        const spnData = spnCtx.createImageData(width, height);
+        const sData = spnData.data;
+
+        // Simple Median Filter (3x3) estimation for Denoising
+        const getMedian = (arr) => {
+            arr.sort((a, b) => a - b);
+            return arr[4];
+        };
+
+        const w = width * 4;
+        const residuals = []; // Store raw residuals for stats
+        let diffSum = 0;
+
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const i = (y * width + x) * 4;
+
+                // Get 3x3 neighborhood for Green channel (most sensitive)
+                const neighborhood = [];
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        neighborhood.push(data[i + (dy * width + dx) * 4 + 1]);
+                    }
+                }
+
+                const median = getMedian(neighborhood);
+                const val = data[i + 1]; // Green channel
+
+                // Residual = |Original - Denoised|
+                let diff = Math.abs(val - median);
+                diffSum += diff;
+
+                // Collect for stats (limit sampling for performance if needed, but here we take all)
+                // To save memory on large images, maybe sample? JS arrays can handle a few MP.
+                if (x % 2 === 0 && y % 2 === 0) residuals.push(val - median); // Signed residual needed for skewness
+
+                // Amplify for visualization (x10)
+                const visual = Math.min(255, diff * 10);
+
+                sData[i] = visual;     // R (Grayscale)
+                sData[i + 1] = visual; // G
+                sData[i + 2] = visual; // B
+                sData[i + 3] = 255;    // Alpha
+            }
+        }
+
+        spnCtx.putImageData(spnData, 0, 0);
+
+        // Capture visual
+        this.analysisImages['spn'] = spnCanvas.toDataURL('image/jpeg', 0.8);
+        const avgResidual = diffSum / ((width - 2) * (height - 2));
+
+        // Advanced Stats
+        const stats = this.calculateStatistics(residuals);
+
+        // Interpretation
+        // Natural images (Gaussian noise) -> Kurtosis close to 0 (after normalisation, or 3 raw), Skewness close to 0
+        // Splicing/Manipulation often introduces non-Gaussian artifacts -> Higher Kurtosis
+        // Strong Denoising -> Low Variance, High Kurtosis (Peaked)
+
+        let consistency = 'Consistent';
+        let consistClass = 'success';
+
+        // Thresholds are heuristics
+        if (Math.abs(stats.skewness) > 0.5 || stats.kurtosis > 5.0) {
+            consistency = 'Suspicious (Non-Gaussian)';
+            consistClass = 'warning';
+        }
+        if (avgResidual > 15) {
+            consistency = 'High Noise (Possible Grain/ISO)';
+            consistClass = 'danger'; // Reusing danger for high noise awareness
+        }
+
+        spnCanvas.className = 'analysis-canvas';
+        spnCanvas.style.maxWidth = '100%';
+        spnCanvas.style.height = 'auto';
+
+        document.getElementById('spnResults').innerHTML = `
+            <div style="text-align: center; margin-bottom:16px;">
+                <canvas class="analysis-canvas" id="spnDisplay"></canvas>
+            </div>
+            <div class="result-grid">
+                <div class="result-item"><div class="result-label">Avg Noise Residual</div><div class="result-value">${avgResidual.toFixed(2)}</div></div>
+                <div class="result-item"><div class="result-label">Skewness</div><div class="result-value">${stats.skewness.toFixed(3)}</div></div>
+                <div class="result-item"><div class="result-label">Kurtosis (Excess)</div><div class="result-value">${stats.kurtosis.toFixed(3)}</div></div>
+                <div class="result-item"><div class="result-label">Statistical Pattern</div><div class="result-value ${consistClass}">${consistency}</div></div>
+            </div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:10px;">
+                Natural sensor noise typically follows a Gaussian distribution (Skew ≈ 0, Excess Kurtosis ≈ 0). 
+                High deviation suggests artificial noise or manipulation.
+            </div>
+        `;
+        // Append properly to avoid stringify issues
+        document.getElementById('spnDisplay').replaceWith(spnCanvas);
+    }
+
+    // POST-PROCESSING DETECTION (Resampling/Interpolation)
+    async runPostProcessCheck() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🔧 Post-Processing Artifacts', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Detects traces of Resampling (scaling/rotation) and Interpolation methods (Bicubic, Bilinear).
+            </p>
+            <button class="btn btn-primary" id="runPostProcBtn"><span>📉</span> Analyze Artifacts</button>
+            <div id="postProcResults" style="margin-top: 16px;"></div>
+        `);
+        document.getElementById('runPostProcBtn').addEventListener('click', () => this.analyzePostProcessing());
+    }
+
+    async analyzePostProcessing() {
+        document.getElementById('postProcResults').innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 100));
+
+        // 1. Interpolation Detection (Local Correlation)
+        // Interpolation introduces periodicity in pixel correlations.
+        // Simplified check: Variance of neighbor differences.
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = this.currentImage.width;
+        canvas.height = this.currentImage.height;
+        ctx.drawImage(this.currentImage, 0, 0);
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+        let diffSum = 0;
+        let diffCount = 0;
+
+        for (let i = 0; i < data.length - 8; i += 4) {
+            const val = data[i + 1]; // Green
+            const next = data[i + 5];
+            diffSum += Math.abs(val - next);
+            diffCount++;
+        }
+        const avgDiff = diffSum / diffCount;
+
+        // Low avgDiff often means upscaling (blurring/smoothness)
+        // High avgDiff means sharpening or noise.
+
+        let resamplingLikelihood = 'Low';
+        let resamplingScore = 0;
+
+        if (avgDiff < 2.0) {
+            resamplingLikelihood = 'High (Upscaled/Blurred)';
+            resamplingScore = 80;
+        } else if (avgDiff < 4.0) {
+            resamplingLikelihood = 'Medium (Possible Softening)';
+            resamplingScore = 50;
+        }
+
+        document.getElementById('postProcResults').innerHTML = `
+            <div class="result-grid">
+                <div class="result-item"><div class="result-label">Pixel Correlation (Smoothness)</div><div class="result-value">${avgDiff.toFixed(2)}</div></div>
+                <div class="result-item"><div class="result-label">Resampling Trace</div><div class="result-value ${resamplingScore > 50 ? 'warning' : 'success'}">${resamplingLikelihood}</div></div>
+            </div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                Note: "High" likelihood often indicates the image was upscaled or heavily smoothed (denoised).
+            </div>
+        `;
+    }
+
+    // FORGERY RISK AGGREGATOR
+    async runForgeryRisk() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🛡️ Forgery Risk Assessment', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Aggregates data from all analysis modules to calculate a global "Trust Score".
+            </p>
+            <button class="btn btn-primary" id="runRiskBtn"><span>🎲</span> Calculate Trust Score</button>
+            <div id="riskResults" style="margin-top: 16px;"></div>
+        `);
+        document.getElementById('runRiskBtn').addEventListener('click', () => this.calculateForgeryRisk());
+    }
+
+    async calculateForgeryRisk() {
+        document.getElementById('riskResults').innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 100));
+
+        let score = 100; // Start with perfect trust
+        const deductions = [];
+
+        // 1. Metadata
+        if (!this.analysisData.hasExif) {
+            score -= 10;
+            deductions.push('Missing EXIF Metadata (-10)');
+        }
+        if (this.analysisData.editingSoftware) {
+            score -= 20;
+            deductions.push('Editing Software Detected (-20)');
+        }
+        if (!this.analysisData.signatureValid) {
+            score -= 30;
+            deductions.push('File Signature Mismatch (-30)');
+        }
+
+        // 2. AI / Deepfake (Require checking if ran, or run lightly)
+        // If data exists
+        if (this.analysisData.metadata && this.analysisData.metadata['AI Generator']) {
+            score -= 40;
+            deductions.push('AI Generator Signature (-40)');
+        }
+
+        // 3. Steganography
+        if (this.analysisData.stego && this.analysisData.stego.likelihood === 'Very High') {
+            score -= 20;
+            deductions.push('High Entropy / Hidden Data (-20)');
+        }
+
+        // 4. Clone Detection (Check if results exist in DOM or data)
+        // Since we don't store clone count in this.analysisData yet, we might miss it if not run.
+        // We will just base it on what we have.
+
+        score = Math.max(0, score);
+
+        let color = 'var(--success)';
+        let verdict = 'High Trust';
+        if (score < 50) { color = 'var(--danger)'; verdict = 'Likely Manipulated'; }
+        else if (score < 80) { color = 'var(--warning)'; verdict = 'Suspicious'; }
+
+        document.getElementById('riskResults').innerHTML = `
+            <div style="text-align: center; margin-bottom: 24px;">
+                <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 4px;">Global Trust Score</div>
+                <div style="font-size: 48px; font-weight: 800; color: ${color};">${score}/100</div>
+                <div style="font-size: 18px; font-weight: 600; color: ${color};">${verdict}</div>
+            </div>
+            
+            ${deductions.length > 0 ? `
+            <div style="background: var(--bg-surface); padding: 12px; border-radius: 8px;">
+                <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">Risk Factors Found:</div>
+                <ul style="padding-left: 20px; margin: 0; font-size: 13px; color: var(--text-secondary);">
+                    ${deductions.map(d => `<li>${d}</li>`).join('')}
+                </ul>
+            </div>` : '<div style="text-align: center; color: var(--text-muted); font-size: 13px;">No obvious risk factors detected based on available analysis.</div>'}
+        `;
+    }
+
+    // CGI / SYNTHETIC IMAGE DETECTION
+    async runCGIDetection() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🤖 CGI / Synthetic Analysis', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Analyzes signal properties to distinguish between Natural Photography (Camera) and Computer Generated Imagery (CGI/3D Renders).
+            </p>
+            <button class="btn btn-primary" id="runCGIBtn"><span>🧠</span> Run CGI Forensic Check</button>
+            <div id="cgiResults" style="margin-top: 16px;"></div>
+        `);
+        document.getElementById('runCGIBtn').addEventListener('click', () => this.analyzeCGI());
+    }
+
+    async analyzeCGI() {
+        document.getElementById('cgiResults').innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 100));
+
+        // 1. Noise Level & Statistics
+        // Calculate noise residuals (Difference from local mean)
+        const residuals = [];
+        let noiseSum = 0, count = 0;
+
+        for (let i = 4; i < data.length - 4; i += 16) { // Sampling for speed
+            // Green channel (i+1) usually best for noise
+            const localMean = (data[i - 3] + data[i + 5]) / 2; // Simple 1D neighbor mean
+            const val = data[i + 1];
+            const diff = val - localMean;
+            residuals.push(diff);
+            noiseSum += Math.abs(diff);
+            count++;
+        }
+
+        const noiseLevel = noiseSum / count;
+        const stats = this.calculateStatistics(residuals);
+
+        // 2. Edge Harshness
+        // CGI often has perfect anti-aliasing or very sharp edges compared to lens blur.
+        let edgeSum = 0;
+        for (let y = 1; y < canvas.height - 1; y += 4) {
+            for (let x = 1; x < canvas.width - 1; x += 4) {
+                const idx = (y * canvas.width + x) * 4;
+                const gx = Math.abs(data[idx - 4] - data[idx + 4]);
+                const gy = Math.abs(data[idx - canvas.width * 4] - data[idx + canvas.width * 4]);
+                edgeSum += (gx + gy);
+            }
+        }
+        // Normalize edge density
+        const edgeDensity = edgeSum / (count);
+
+        // Scoring Heuristic
+        // Low noise + High edge density (perfect focus everywhere) -> Likely CGI
+        let cgiScore = 0;
+
+        // Noise Level Check
+        if (noiseLevel < 2.0) cgiScore += 30; // Extremely clean
+        else if (noiseLevel < 4.0) cgiScore += 15;
+
+        // Statistical Check (Kurtosis)
+        // High Kurtosis (> 10) in residuals often means "Peaky" distribution -> Clean synthetic or sparse noise
+        // Gaussian noise (Real camera) -> Kurtosis ~ 0-3 (Excess ~0)
+        // Uniform noise (Artificial) -> Kurtosis < 0
+
+        if (stats.kurtosis > 10.0) cgiScore += 20; // Very peaked (clean flat areas)
+        else if (stats.kurtosis < -1.0) cgiScore += 15; // Platykurtic (Uniform/Artificial noise)
+
+        // Edge Check
+        // Real photos usually have depth of field (blur). High avg edge density = All in focus (Render)
+        if (edgeDensity > 15) cgiScore += 20;
+
+        // Metadata Check (Quick)
+        if (!this.analysisData.hasExif) cgiScore += 20; // Renders often lack EXIF
+        if (this.analysisData.metadata && this.analysisData.metadata['Software'] &&
+            (this.analysisData.metadata['Software'].includes('Blender') ||
+                this.analysisData.metadata['Software'].includes('Maya') ||
+                this.analysisData.metadata['Software'].includes('Unreal'))) {
+            cgiScore += 30;
+        }
+
+        cgiScore = Math.min(100, cgiScore);
+
+        let verdict = 'Likely Natural Photography';
+        let color = 'success';
+
+        if (cgiScore > 70) { verdict = 'High Probability of CGI / Synthetic'; color = 'danger'; }
+        else if (cgiScore > 40) { verdict = 'Possible CGI / Hybrid'; color = 'warning'; }
+
+        document.getElementById('cgiResults').innerHTML = `
+            <div style="text-align: center; margin-bottom: 24px;">
+                <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 4px;">CGI Probability Score</div>
+                <div style="font-size: 48px; font-weight: 800; color: var(--${color});">${cgiScore}%</div>
+                <div style="font-size: 18px; font-weight: 600; color: var(--${color});">${verdict}</div>
+            </div>
+
+            <div class="result-grid">
+                <div class="result-item"><div class="result-label">Noise Level</div><div class="result-value">${noiseLevel.toFixed(2)}</div></div>
+                <div class="result-item"><div class="result-label">Edge Density</div><div class="result-value">${edgeDensity.toFixed(2)}</div></div>
+                <div class="result-item"><div class="result-label">Residual Kurtosis</div><div class="result-value">${stats.kurtosis.toFixed(2)}</div></div>
+                <div class="result-item"><div class="result-label">Residual Skewness</div><div class="result-value">${stats.skewness.toFixed(2)}</div></div>
+            </div>
+            
+            <div style="margin-top: 16px; font-size: 12px; color: var(--text-muted);">
+                <strong>Analysis Logic:</strong><br>
+                • <strong>Low Noise:</strong> Synthetic images are often too clean.<br>
+                • <strong>High Edge Density:</strong> Renders often lack natural depth-of-field blur.<br>
+                • <strong>Kurtosis:</strong> Deviation from Gaussian distribution triggers suspicion.
+            </div>
+            <div style="text-align: right; font-size: 11px; color: var(--text-muted); margin-top: 4px;">CGI Probability: ${cgiScore}%</div>
+        `;
+    }
+
+
+
+    // REVERSE IMAGE SEARCH INTEGRATION
+    async runReverseImageSearch() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🌍 Reverse Image Search', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Check if this image appears elsewhere on the web. Useful for verifying origins and detecting stolen content.
+                <br><br>
+                <em style="font-size:12px; opacity: 0.8;">Note: Due to browser security, you must copy the image and paste it into the search engine manually, or use the specialized links below if the image is hosted. Since this is a local file, "Copy & Paste" is the best method.</em>
+            </p>
+            
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                <button class="btn btn-primary" id="copyImgBtn" style="flex: 1;">
+                    <span>📋</span> Copy Image to Clipboard
+                </button>
+            </div>
+
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 10px;">Open Search Engines:</div>
+            <div class="result-grid" style="grid-template-columns: 1fr 1fr;">
+                 <a href="https://images.google.com/" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:center;">Google Images</a>
+                 <a href="https://www.bing.com/visualsearch" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:center;">Bing Visual</a>
+                 <a href="https://yandex.com/images/" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:center;">Yandex</a>
+                 <a href="https://tineye.com/" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:center;">TinEye</a>
+            </div>
+            <div id="copyStatus" style="margin-top: 10px; font-size: 13px; color: var(--success); height: 20px;"></div>
+        `);
+
+        document.getElementById('copyImgBtn').addEventListener('click', async () => {
+            const status = document.getElementById('copyStatus');
+            try {
+                const blob = await new Promise(resolve => this.currentImageCanvas.toBlob(resolve, 'image/png'));
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                status.innerText = '✅ Image copied! Now paste (Ctrl+V) in the search engine.';
+                setTimeout(() => status.innerText = '', 3000);
+            } catch (err) {
+                // Fallback for some browsers or if canvas not ready
+                try {
+                    // Try to fetch original file blob
+                    const fileBytes = await this.fileToArrayBuffer(this.currentFile);
+                    // This part is tricky because File/Blob access varies.
+                    // The Canvas method is safer for "visual" copy.
+                    status.style.color = 'var(--danger)';
+                    status.innerText = '❌ Copy failed. Please right-click the image preview and select "Copy Image".';
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        });
+
+        // Ensure we have a canvas source for the copy
+        if (!this.currentImageCanvas) {
+            const canvas = document.createElement('canvas');
+            canvas.width = this.currentImage.naturalWidth;
+            canvas.height = this.currentImage.naturalHeight;
+            canvas.getContext('2d').drawImage(this.currentImage, 0, 0);
+            this.currentImageCanvas = canvas;
+        }
+    }
+
+    // THUMBNAIL ANALYSIS
+    async runThumbnailAnalysis() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('🖼️ Thumbnail Analysis', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Extracts the embedded thumbnail (if present) and compares it with the main image. 
+                Discrepancies often indicate the image was modified but the thumbnail was not updated.
+            </p>
+            <div id="thumbResults" style="margin-top: 16px;"></div>
+        `);
+
+        await new Promise(r => setTimeout(r, 100));
+        const resDiv = document.getElementById('thumbResults');
+
+        const meta = this.analysisData.metadata;
+
+        if (meta && meta['Thumbnail Offset'] && meta['Thumbnail Length']) {
+            try {
+                const offset = meta['Thumbnail Offset'];
+                const length = meta['Thumbnail Length'];
+
+                const buffer = await this.fileToArrayBuffer(this.currentFile);
+                const view = new DataView(buffer);
+
+                // Re-find tiffStart logic
+                let tiffStart = 0;
+                if (view.getUint16(0) === 0xFFD8) {
+                    let o = 2;
+                    while (o < Math.min(buffer.byteLength - 4, 65535)) {
+                        if (view.getUint8(o) !== 0xFF) break;
+                        const m = view.getUint8(o + 1);
+                        if (m === 0xD9 || m === 0xDA) break;
+                        const l = view.getUint16(o + 2);
+                        if (m === 0xE1) {
+                            if (view.getUint8(o + 4) === 0x45 && view.getUint8(o + 5) === 0x78) { // Exif
+                                tiffStart = o + 10;
+                                break;
+                            }
+                        }
+                        o += 2 + l;
+                    }
+                }
+
+                if (tiffStart > 0 && tiffStart + offset + length <= buffer.byteLength) {
+                    const thumbBytes = buffer.slice(tiffStart + offset, tiffStart + offset + length);
+                    const blob = new Blob([thumbBytes], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+
+                    const img = new Image();
+                    img.src = url;
+                    await new Promise(r => img.onload = r);
+
+                    const mainRatio = this.currentImage.naturalWidth / this.currentImage.naturalHeight;
+                    const thumbRatio = img.width / img.height;
+                    const ratioDiff = Math.abs(mainRatio - thumbRatio);
+
+                    let verdict = 'Match';
+                    let color = 'success';
+
+                    if (ratioDiff > 0.1) {
+                        verdict = 'Mismatch (Aspect Ratio)';
+                        color = 'danger';
+                    }
+
+                    resDiv.innerHTML = `
+                         <div style="display:flex; justify-content:center; gap:20px; align-items:center; margin-bottom:16px;">
+                             <div style="text-align:center;">
+                                 <div style="font-size:12px; margin-bottom:4px; color:var(--text-secondary);">Original</div>
+                                 <img src="${this.currentImage.src}" style="max-width:150px; border-radius:4px; max-height:150px; object-fit:contain; border:1px solid #333;">
+                             </div>
+                             <div style="text-align:center;">
+                                 <div style="font-size:12px; margin-bottom:4px; color:var(--text-secondary);">Thumbnail</div>
+                                 <img src="${url}" style="max-width:150px; border-radius:4px; max-height:150px; object-fit:contain; border:1px solid #333;">
+                             </div>
+                         </div>
+                         <div class="result-grid">
+                             <div class="result-item"><div class="result-label">Thumbnail Size</div><div class="result-value">${img.width} x ${img.height}</div></div>
+                             <div class="result-item"><div class="result-label">Ratio Match</div><div class="result-value ${ratioDiff < 0.05 ? 'success' : 'danger'}">${(ratioDiff < 0.05) ? 'Yes' : 'No'}</div></div>
+                             <div class="result-item"><div class="result-label">Verdict</div><div class="result-value ${color}">${verdict}</div></div>
+                         </div>
+                         ${ratioDiff > 0.1 ? '<div style="margin-top:8px; font-size:12px; color:var(--text-warning);">Warning: Thumbnail aspect ratio does not match main image. Image may be cropped or edited without updating thumbnail.</div>' : ''}
+                    `;
+                } else {
+                    resDiv.innerHTML = '<div style="text-align:center; color:var(--text-secondary); padding:20px;">Thumbnail metadata found, but data extraction failed (offset error).</div>';
+                }
+            } catch (e) {
+                console.error(e);
+                resDiv.innerHTML = '<div style="text-align:center; color:var(--error); padding:20px;">Error extracting thumbnail data.</div>';
+            }
+        } else {
+            resDiv.innerHTML = '<div style="text-align:center; color:var(--text-secondary); padding:20px;">No embedded JPEG thumbnail found in metadata.</div>';
+        }
+    }
+
     // JPEG ANALYSIS
     async runJPEGAnalysis() {
         const quality = this.analysisData.estimatedQuality || this.estimateQuality();
@@ -1940,20 +3033,171 @@ class ForensicX {
     }
 
     async generateFFT() {
+        document.getElementById('fftResults').innerHTML = '<div class="spinner" style="margin: 20px auto;"></div><p style="text-align:center;color:var(--text-muted);">Computing 2D FFT (This may take a moment)...</p>';
+
+        // Allow UI to update
+        await new Promise(r => setTimeout(r, 100));
+
+        const size = 256; // Power of 2 for FFT
         const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = 256; canvas.className = 'analysis-canvas';
+        canvas.width = size;
+        canvas.height = size;
         const ctx = canvas.getContext('2d');
-        const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-        gradient.addColorStop(0, '#fbbf24'); gradient.addColorStop(0.5, '#dc2626'); gradient.addColorStop(1, '#1a1a25');
-        ctx.fillStyle = gradient; ctx.fillRect(0, 0, 256, 256);
-        for (let i = 0; i < 300; i++) {
-            const x = Math.random() * 256, y = Math.random() * 256;
-            ctx.globalAlpha = Math.max(0, (1 - Math.sqrt(Math.pow(x - 128, 2) + Math.pow(y - 128, 2)) / 128)) * Math.random();
-            ctx.fillStyle = '#fff'; ctx.fillRect(x, y, 2, 2);
+
+        // Draw resized image
+        ctx.drawImage(this.currentImage, 0, 0, size, size);
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const data = imageData.data;
+
+        // Prepare Real and Imaginary components (Grayscale)
+        const real = new Float32Array(size * size);
+        const imag = new Float32Array(size * size);
+
+        for (let i = 0; i < size * size; i++) {
+            const r = data[i * 4];
+            const g = data[i * 4 + 1];
+            const b = data[i * 4 + 2];
+            real[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+            imag[i] = 0;
         }
-        ctx.globalAlpha = 1;
-        document.getElementById('fftResults').innerHTML = '<div id="fftCanvas" style="text-align: center;"></div>';
-        document.getElementById('fftCanvas').appendChild(canvas);
+
+        // FFT Helper (Cooley-Tukey Recursive)
+        const fft1D = (re, im, offset, stride, n) => {
+            if (n === 1) return;
+
+            fft1D(re, im, offset, stride * 2, n / 2);
+            fft1D(re, im, offset + stride, stride * 2, n / 2);
+
+            for (let k = 0; k < n / 2; k++) {
+                const angle = -2 * Math.PI * k / n;
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+
+                const evenIndex = offset + stride * 2 * k;
+                const oddIndex = offset + stride * (2 * k + 1); // Bug fix: stride vs count
+
+                // My recursive stride logic is tricky. Let's use a simpler copy-based recursive for clarity and correctness
+                // or iterative bit-reversal.
+                // Given the constraints and risk of bugs in custom FFT, let's use a known iterative structure or simple recursive with array copies (slower but safer).
+                // Actually, for 256x256, simple separate arrays is fast enough.
+            }
+        };
+
+        // Simple Recursive FFT with allocation (easiest to get right)
+        const fft = (inputRe, inputIm) => {
+            const n = inputRe.length;
+            if (n === 1) return { re: inputRe, im: inputIm };
+
+            const evenRe = new Float32Array(n / 2);
+            const evenIm = new Float32Array(n / 2);
+            const oddRe = new Float32Array(n / 2);
+            const oddIm = new Float32Array(n / 2);
+
+            for (let i = 0; i < n / 2; i++) {
+                evenRe[i] = inputRe[2 * i]; evenIm[i] = inputIm[2 * i];
+                oddRe[i] = inputRe[2 * i + 1]; oddIm[i] = inputIm[2 * i + 1];
+            }
+
+            const even = fft(evenRe, evenIm);
+            const odd = fft(oddRe, oddIm);
+
+            const outputRe = new Float32Array(n);
+            const outputIm = new Float32Array(n);
+
+            for (let k = 0; k < n / 2; k++) {
+                const angle = -2 * Math.PI * k / n;
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+
+                const tRe = cos * odd.re[k] - sin * odd.im[k];
+                const tIm = sin * odd.re[k] + cos * odd.im[k];
+
+                outputRe[k] = even.re[k] + tRe;
+                outputIm[k] = even.im[k] + tIm;
+                outputRe[k + n / 2] = even.re[k] - tRe;
+                outputIm[k + n / 2] = even.im[k] - tIm;
+            }
+            return { re: outputRe, im: outputIm };
+        };
+
+        // Row FFT
+        for (let y = 0; y < size; y++) {
+            const rowRe = new Float32Array(size);
+            const rowIm = new Float32Array(size);
+            for (let x = 0; x < size; x++) {
+                rowRe[x] = real[y * size + x];
+                rowIm[x] = imag[y * size + x];
+            }
+            const res = fft(rowRe, rowIm);
+            for (let x = 0; x < size; x++) {
+                real[y * size + x] = res.re[x];
+                imag[y * size + x] = res.im[x];
+            }
+        }
+
+        // Col FFT
+        for (let x = 0; x < size; x++) {
+            const colRe = new Float32Array(size);
+            const colIm = new Float32Array(size);
+            for (let y = 0; y < size; y++) {
+                colRe[y] = real[y * size + x];
+                colIm[y] = imag[y * size + x];
+            }
+            const res = fft(colRe, colIm);
+            for (let y = 0; y < size; y++) {
+                real[y * size + x] = res.re[y];
+                imag[y * size + x] = res.im[y];
+            }
+        }
+
+        // Compute Magnitude and Shift
+        const magnitude = new Float32Array(size * size);
+        let maxMag = 0;
+
+        for (let i = 0; i < size * size; i++) {
+            let mag = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
+            mag = Math.log(1 + mag); // Log scale
+            magnitude[i] = mag;
+            if (mag > maxMag) maxMag = mag;
+        }
+
+        // Draw Shifted (Centering zero freq)
+        const fftImg = ctx.createImageData(size, size);
+        const shiftIdx = (x, y) => {
+            const sx = (x + size / 2) % size;
+            const sy = (y + size / 2) % size;
+            return sy * size + sx;
+        };
+
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const idx = y * size + x;
+                const sourceIdx = shiftIdx(x, y);
+                const val = Math.floor((magnitude[sourceIdx] / maxMag) * 255);
+
+                fftImg.data[idx * 4] = val;     // R
+                fftImg.data[idx * 4 + 1] = val; // G
+                fftImg.data[idx * 4 + 2] = val; // B
+                fftImg.data[idx * 4 + 3] = 255; // Alpha
+            }
+        }
+
+        ctx.putImageData(fftImg, 0, 0);
+
+        // Display
+        document.getElementById('fftResults').innerHTML = `
+        <div style="text-align: center;">
+            <canvas class="analysis-canvas" style="border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 100%; height: auto;"></canvas>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">Magnitude Spectrum (Log Scale)</p>
+        </div>
+    `;
+        const container = document.querySelector('#fftResults canvas');
+        container.replaceWith(canvas);
+        canvas.className = 'analysis-canvas';
+        canvas.style.maxWidth = '100%';
+        canvas.style.height = 'auto';
+
+        this.analysisImages['fft'] = canvas.toDataURL('image/png');
     }
 
     // RUN ALL TESTS
@@ -2153,6 +3397,41 @@ class ForensicX {
         </div>
 
         <div class="section">
+            <div class="section-title">🔍 Analysis Visuals</div>
+            <div class="section-content">
+                <div class="result-grid" style="grid-template-columns: 1fr; gap: 24px;">
+                    ${this.analysisImages['ela'] ? `
+                        <div style="text-align: center;">
+                            <h3 style="margin-bottom: 8px; color: #e8eaed;">Error Level Analysis (ELA)</h3>
+                            <img src="${this.analysisImages['ela']}" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2d35;">
+                        </div>
+                    ` : ''}
+                    
+                    ${this.analysisImages['stego'] ? `
+                        <div style="text-align: center;">
+                            <h3 style="margin-bottom: 8px; color: #e8eaed;">Steganography (Bit Plane)</h3>
+                            <img src="${this.analysisImages['stego']}" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2d35;">
+                             ${this.analysisData.stego ? `
+                                <div style="margin-top: 8px; display: flex; justify-content: center; gap: 16px; font-size: 13px; color: #9aa0b0;">
+                                    <span>Entropy: <strong>${this.analysisData.stego.entropy}</strong></span>
+                                    <span>Randomness: <strong>${this.analysisData.stego.randomness}</strong></span>
+                                    <span>Likelihood: <strong style="color: ${this.analysisData.stego.likelihood === 'Very High' ? '#ef4444' : '#6366f1'}">${this.analysisData.stego.likelihood}</strong></span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+
+                    ${this.analysisImages['fft'] ? `
+                        <div style="text-align: center;">
+                            <h3 style="margin-bottom: 8px; color: #e8eaed;">FFT Frequency Analysis</h3>
+                            <img src="${this.analysisImages['fft']}" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2d35;">
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
             <div class="section-title">🔍 Analysis Summary</div>
             <div class="section-content">
                 <div class="result-grid">
@@ -2281,52 +3560,53 @@ h1{color:#6366f1;}.meta{background:#1a1a25;padding:16px;border-radius:8px;margin
             y += 10;
         };
 
+        const addSubHeader = (text) => {
+            checkPage(10);
+            y += 5;
+            doc.setFontSize(12);
+            doc.setTextColor(100, 100, 100);
+            doc.setFont(undefined, 'bold');
+            doc.text(text, 20, y);
+            doc.setFont(undefined, 'normal');
+            y += 8;
+        };
+
         const addText = (label, value) => {
             checkPage();
             doc.setFontSize(10);
             doc.setTextColor(80, 80, 80);
-            doc.text(`${label}:`, 25, y);
-
-            const valueStr = String(value);
-            doc.setTextColor(40, 40, 40);
-
-            // Text wrapping for long values
-            const splitText = doc.splitTextToSize(valueStr, pageWidth - 80);
-            doc.text(splitText, 75, y);
-
-            y += (splitText.length * lineHeight);
+            doc.text(`${label}:`, 20, y);
+            doc.setTextColor(0, 0, 0);
+            const splitText = doc.splitTextToSize(String(value), pageWidth - 70);
+            doc.text(splitText, 60, y);
+            y += (splitText.length * 5) + 2;
         };
 
-        // Title
-        doc.setFontSize(22);
-        doc.setTextColor(99, 102, 241); // Accent color
-        doc.text('ForensicX Forensic Report', 20, y);
-        y += 15;
+        const addImage = (imageData, label) => {
+            if (imageData) {
+                checkPage(90); // Image + Label
+                try {
+                    const imgProps = doc.getImageProperties(imageData);
+                    const ratio = imgProps.height / imgProps.width;
+                    const width = 120;
+                    const height = width * ratio;
 
-        // Line
-        doc.setDrawColor(99, 102, 241);
-        doc.setLineWidth(0.5);
-        doc.line(20, y, 190, y);
-        y += 15;
+                    if (y + height > pageHeight - 20) { doc.addPage(); y = 20; }
 
-        // File Info
-        addHeader('File Information');
-        addText('Filename', data.filename);
-        addText('Dimensions', data.dimensions);
-        addText('File Size', data.fileSize);
-        addText('Report Date', new Date().toLocaleString());
-        y += 5;
-
-        // Analysis Summary
-        if (data.analysis) {
-            addHeader('Analysis Summary');
-            addText('Signature Valid', data.analysis.signatureValid ? 'Yes' : 'No');
-            addText('Detected Type', data.analysis.detectedType || 'N/A');
-            addText('Est. Quality', (data.analysis.estimatedQuality || 'N/A') + '%');
-            if (data.analysis.metadata && data.analysis.metadata['AI Generator']) {
-                addText('AI Detection', '⚠️ AI Signatures Found: ' + data.analysis.metadata['AI Generator']);
+                    doc.addImage(imageData, 'JPEG', (pageWidth - width) / 2, y, width, height);
+                    y += height + 5;
+                    doc.setFontSize(9);
+                    doc.setTextColor(128, 128, 128);
+                    doc.text(label, pageWidth / 2, y, { align: 'center' });
+                    y += 10;
+                } catch (e) {
+                    console.error("Error adding image to PDF", e);
+                }
             }
         }
+
+        // --- TITLE ---
+        doc.setFontSize(22);
 
         // EXIF Metadata
         if (data.analysis.metadata) {
@@ -2452,19 +3732,71 @@ h1{color:#6366f1;}.meta{background:#1a1a25;padding:16px;border-radius:8px;margin
     // GEOLOCATION
     async runGeolocation() {
         const metadata = this.analysisData.metadata || {};
-        const hasGPS = metadata['GPS Latitude'] || metadata['GPSLatitude'] || false;
+        const hasGPS = (metadata['GPS Latitude'] || metadata['GPSLatitude']) && (metadata['GPS Longitude'] || metadata['GPSLongitude']);
 
-        document.getElementById('moduleResults').innerHTML = this.createCard('🌍 Geolocation Analysis', `
-            <div class="result-grid">
-                <div class="result-item"><div class="result-label">GPS Data</div><div class="result-value ${hasGPS ? 'success' : 'warning'}">${hasGPS ? 'Present' : 'Not Found'}</div></div>
-                <div class="result-item"><div class="result-label">Latitude</div><div class="result-value">${this.escapeHtml(metadata['GPS Latitude'] || metadata['GPSLatitude'] || 'N/A')}</div></div>
-                <div class="result-item"><div class="result-label">Longitude</div><div class="result-value">${this.escapeHtml(metadata['GPS Longitude'] || metadata['GPSLongitude'] || 'N/A')}</div></div>
-                <div class="result-item"><div class="result-label">Altitude</div><div class="result-value">${this.escapeHtml(metadata['GPS Altitude'] || 'N/A')}</div></div>
-            </div>
-            <p style="margin-top: 16px; color: var(--text-muted); font-size: 12px;">
-                ${hasGPS ? '⚠️ This image contains location data that could reveal where it was taken.' : 'No GPS coordinates found in image metadata. Location data may have been stripped.'}
-            </p>
-        `);
+        if (hasGPS) {
+            const lat = this.convertDMSToDD(metadata['GPS Latitude'] || metadata['GPSLatitude'], metadata['GPS Latitude Ref'] || metadata['GPSLatitudeRef']);
+            const lng = this.convertDMSToDD(metadata['GPS Longitude'] || metadata['GPSLongitude'], metadata['GPS Longitude Ref'] || metadata['GPSLongitudeRef']);
+
+            document.getElementById('moduleResults').innerHTML = this.createCard('<svg class="icon"><use href="#icon-map-pin"/></svg> Geolocation Analysis', `
+                <div class="result-grid" style="margin-bottom: 16px;">
+                    <div class="result-item"><div class="result-label">Latitude</div><div class="result-value">${lat.toFixed(6)}</div></div>
+                    <div class="result-item"><div class="result-label">Longitude</div><div class="result-value">${lng.toFixed(6)}</div></div>
+                    <div class="result-item"><div class="result-label">Altitude</div><div class="result-value">${this.escapeHtml(metadata['GPS Altitude'] || 'N/A')}</div></div>
+                </div>
+                <div id="map" style="height: 300px; width: 100%; border-radius: 8px; z-index: 1;"></div>
+                <div style="margin-top: 12px; font-size: 12px; text-align: right;">
+                    <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" target="_blank" class="btn btn-sm btn-secondary">Open in Google Maps</a>
+                </div>
+            `);
+
+            // Initialize Leaflet
+            // Wait for DOM
+            setTimeout(() => {
+                const map = L.map('map').setView([lat, lng], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(map);
+                L.marker([lat, lng]).addTo(map)
+                    .bindPopup(`<b>Image Location</b><br>${lat.toFixed(6)}, ${lng.toFixed(6)}`).openPopup();
+            }, 100);
+
+        } else {
+            document.getElementById('moduleResults').innerHTML = this.createCard('🌍 Geolocation Analysis', `
+                <div class="result-grid">
+                    <div class="result-item"><div class="result-label">GPS Data</div><div class="result-value warning">Not Found</div></div>
+                </div>
+                <p style="margin-top: 16px; color: var(--text-muted); font-size: 12px;">
+                    No GPS coordinates found in image metadata. Location data may have been stripped or was never present.
+                </p>
+            `);
+        }
+    }
+
+    convertDMSToDD(dms, ref) {
+        if (!dms) return 0;
+        let dd = 0;
+        // Handle array [deg, min, sec]
+        if (Array.isArray(dms)) {
+            dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
+        }
+        // Handle string "34 deg 2' 3.40""
+        else if (typeof dms === 'string') {
+            const parts = dms.match(/(\d+)\s*deg\s*(\d+)'\s*([\d.]+)"/);
+            if (parts) {
+                dd = parseFloat(parts[1]) + parseFloat(parts[2]) / 60 + parseFloat(parts[3]) / 3600;
+            } else {
+                return 0;
+            }
+        }
+        else if (typeof dms === 'number') {
+            dd = dms;
+        }
+
+        if (ref === 'S' || ref === 'W') {
+            dd = dd * -1;
+        }
+        return dd;
     }
 
     // TIMELINE ANALYSIS
@@ -2652,71 +3984,193 @@ h1{color:#6366f1;}.meta{background:#1a1a25;padding:16px;border-radius:8px;margin
         `;
     }
 
-    // PRNU ANALYSIS
-    async runPRNUAnalysis(autoRun = false) {
-        document.getElementById('moduleResults').innerHTML = this.createCard('📸 PRNU Fingerprint Analysis', `
-            <button class="btn btn-primary" id="runPRNUBtn"><span>🔬</span> Extract Sensor Noise</button>
+    // PRNU ANALYSIS (Camera Fingerprint)
+    async runPRNUAnalysis() {
+        document.getElementById('moduleResults').innerHTML = this.createCard('📸 Camera Fingerprint (PRNU)', `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+                Extracts the Photo-Response Non-Uniformity (PRNU) noise pattern. This "fingerprint" is unique to the specific camera sensor.
+                <br>You can compare this image against a reference image to verify if they were taken by the same device.
+            </p>
+            <div style="display:flex; gap:10px; margin-bottom:16px;">
+                <button class="btn btn-primary" id="extractPRNUBtn"><span>🔬</span> Extract Fingerprint</button>
+                <button class="btn btn-secondary" id="comparePRNUBtn" disabled><span>🔄</span> Compare with Reference</button>
+                <input type="file" id="referenceInput" accept="image/*" style="display:none">
+            </div>
             <div id="prnuResults" style="margin-top: 16px;"></div>
         `);
-        document.getElementById('runPRNUBtn').addEventListener('click', () => this.analyzePRNU());
 
-        if (autoRun) await this.analyzePRNU();
+        const extractBtn = document.getElementById('extractPRNUBtn');
+        const compareBtn = document.getElementById('comparePRNUBtn');
+        const refInput = document.getElementById('referenceInput');
+
+        extractBtn.addEventListener('click', async () => {
+            await this.extractFingerprint(this.currentImage, 'prnuResults');
+            compareBtn.disabled = false;
+        });
+
+        compareBtn.addEventListener('click', () => refInput.click()); // Trigger file input
+
+        refInput.addEventListener('change', async (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const refFile = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const img = new Image();
+                    img.onload = async () => {
+                        await this.compareFingerprints(this.currentImage, img, 'prnuResults');
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(refFile);
+            }
+        });
     }
-    async analyzePRNU() {
-        const resultsDiv = document.getElementById('prnuResults');
-        resultsDiv.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
 
+    // Helper to extract noise pattern (Green channel)
+    getNoisePattern(image, width, height) {
         const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
-        const scale = Math.min(300 / this.currentImage.width, 1);
-        canvas.width = this.currentImage.width * scale;
-        canvas.height = this.currentImage.height * scale;
-        ctx.drawImage(this.currentImage, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, width, height);
+        const data = ctx.getImageData(0, 0, width, height).data;
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
+        const noise = new Float32Array(width * height);
 
-        // Extract noise pattern using Wiener filter approximation
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = canvas.width;
-        noiseCanvas.height = canvas.height;
-        noiseCanvas.className = 'analysis-canvas';
-        noiseCanvas.style.maxWidth = '100%';
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const noiseData = noiseCtx.createImageData(canvas.width, canvas.height);
+        // Simple Denoising (Local Mean Subtraction)
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const i = (y * width + x) * 4;
+                const val = data[i + 1]; // Green channel
 
-        let noiseSum = 0;
-        for (let y = 1; y < canvas.height - 1; y++) {
-            for (let x = 1; x < canvas.width - 1; x++) {
-                const idx = (y * canvas.width + x) * 4;
-                const neighbors = [
-                    data[idx - 4], data[idx + 4],
-                    data[idx - canvas.width * 4], data[idx + canvas.width * 4]
-                ];
-                const avg = neighbors.reduce((a, b) => a + b) / 4;
-                const noise = (data[idx] - avg + 128);
-                noiseData.data[idx] = noiseData.data[idx + 1] = noiseData.data[idx + 2] = Math.max(0, Math.min(255, noise));
-                noiseData.data[idx + 3] = 255;
-                noiseSum += Math.abs(data[idx] - avg);
+                // 3x3 Mean
+                let sum = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        sum += data[i + (dy * width + dx) * 4 + 1];
+                    }
+                }
+                const mean = sum / 9;
+                noise[y * width + x] = val - mean;
             }
         }
-        noiseCtx.putImageData(noiseData, 0, 0);
-
-        const avgNoise = noiseSum / (canvas.width * canvas.height);
-
-        resultsDiv.innerHTML = `
-            <div class="result-grid" style="margin-bottom: 16px;">
-                <div class="result-item"><div class="result-label">Noise Level</div><div class="result-value">${avgNoise.toFixed(2)}</div></div>
-                <div class="result-item"><div class="result-label">Pattern Quality</div><div class="result-value">${avgNoise > 5 ? 'Good' : avgNoise > 2 ? 'Fair' : 'Low'}</div></div>
-            </div>
-            <p style="margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">Extracted Sensor Noise Pattern:</p>
-            <div id="prnuCanvas"></div>
-            <p style="margin-top: 12px; color: var(--text-muted); font-size: 12px;">
-                PRNU patterns are unique to each camera sensor and can be used for device identification.
-            </p>
-        `;
-        document.getElementById('prnuCanvas').appendChild(noiseCanvas);
+        return noise;
     }
+
+    async extractFingerprint(img, targetId) {
+        const resDiv = document.getElementById(targetId);
+        resDiv.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 50)); // UI Refresh
+
+        // We use a center crop of 512x512 for standardized fingerprinting if image is large enough
+        // Or rescale small images.
+        let w = img.width;
+        let h = img.height;
+
+        if (w > 1024) { w = 1024; h = Math.floor(img.height * (1024 / img.width)); }
+
+        // Visualizing the noise
+        const noise = this.getNoisePattern(img, w, h);
+
+        // Create visual canvas
+        const visCanvas = document.createElement('canvas');
+        visCanvas.width = w;
+        visCanvas.height = h;
+        const ctx = visCanvas.getContext('2d');
+        const imgData = ctx.createImageData(w, h);
+
+        for (let i = 0; i < noise.length; i++) {
+            const v = Math.min(255, Math.max(0, 127 + noise[i] * 10)); // Amplify
+            imgData.data[i * 4] = v;
+            imgData.data[i * 4 + 1] = v;
+            imgData.data[i * 4 + 2] = v;
+            imgData.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        resDiv.innerHTML = `
+            <div style="text-align: center;">
+                <canvas style="max-width: 100%; height: auto; border: 1px solid #444;" id="prnuVis"></canvas>
+                <div style="margin-top: 8px; color: var(--text-muted); font-size: 12px;">Enhanced Sensor Noise Pattern</div>
+            </div>
+            <div style="margin-top: 16px; padding: 12px; background: var(--bg-surface); border-radius: 6px; font-size: 13px;">
+                <strong>Fingerprint Extracted.</strong> <br>
+                Upload a reference image to check if it matches this device.
+            </div>
+        `;
+        document.getElementById('prnuVis').replaceWith(visCanvas);
+        visCanvas.className = 'analysis-canvas';
+    }
+
+    async compareFingerprints(img1, img2, targetId) {
+        const resDiv = document.getElementById(targetId);
+        resDiv.innerHTML += '<div class="spinner" style="margin: 20px auto;"></div>';
+        await new Promise(r => setTimeout(r, 50));
+
+        const size = 512; // Compare center crop 512x512
+        // Ensure both are large enough
+        if (img1.width < size || img1.height < size || img2.width < size || img2.height < size) {
+            resDiv.innerHTML += `<div style="color: var(--danger); margin-top: 10px;">Error: Images must be at least ${size}x${size} for reliable comparison.</div>`;
+            return;
+        }
+
+        // Draw center crops
+        const getCenterData = (image) => {
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            c.getContext('2d').drawImage(image, (image.width - size) / 2, (image.height - size) / 2, size, size, 0, 0, size, size);
+            return c; // We need the canvas to pass to getNoisePattern? No, getNoisePattern takes image/canvas
+        };
+
+        const crop1 = getCenterData(img1);
+        const crop2 = getCenterData(img2);
+
+        const n1 = this.getNoisePattern(crop1, size, size);
+        const n2 = this.getNoisePattern(crop2, size, size);
+
+        // Compute PCC (Pearson Correlation Coefficient)
+        let sum1 = 0, sum2 = 0;
+        for (let i = 0; i < n1.length; i++) { sum1 += n1[i]; sum2 += n2[i]; }
+        const mean1 = sum1 / n1.length;
+        const mean2 = sum2 / n2.length;
+
+        let num = 0, den1 = 0, den2 = 0;
+        for (let i = 0; i < n1.length; i++) {
+            const a = n1[i] - mean1;
+            const b = n2[i] - mean2;
+            num += a * b;
+            den1 += a * a;
+            den2 += b * b;
+        }
+
+        const correlation = num / Math.sqrt(den1 * den2);
+
+        // Verdict
+        // PRNU correlation is usually low, > 0.05 is significant for small crops
+        let match = 'No Match';
+        let color = 'danger';
+
+        // Typical thresholds: > 0.1 very strong, > 0.04 likely
+        if (correlation > 0.1) { match = 'Strong Match (Same Camera)'; color = 'success'; }
+        else if (correlation > 0.035) { match = 'Possible Match'; color = 'warning'; }
+
+        // Remove spinner
+        const spinner = resDiv.querySelector('.spinner');
+        if (spinner) spinner.remove();
+
+        // Append result
+        const resultHTML = `
+            <div style="margin-top: 20px; border-top: 1px solid #444; padding-top: 16px;">
+                <div class="result-grid">
+                    <div class="result-item"><div class="result-label">Correlation (PCC)</div><div class="result-value">${correlation.toFixed(4)}</div></div>
+                    <div class="result-item"><div class="result-label">Verdict</div><div class="result-value ${color}">${match}</div></div>
+                </div>
+            </div>
+        `;
+        resDiv.insertAdjacentHTML('beforeend', resultHTML);
+    }
+
+
 
     // UTILITIES
     async fileToArrayBuffer(file) {
